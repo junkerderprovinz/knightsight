@@ -4,7 +4,7 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
-## v1.0.0 (unreleased)
+## v1.0.0 (2026-11-13)
 
 The first release of KnightSight: one window or one screen region, shared with a coding assistant and nothing else.
 
