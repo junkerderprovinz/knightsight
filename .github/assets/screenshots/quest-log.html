@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Quest Log</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M12 2.5 4 5.5v6.2c0 4.6 3.3 8.4 8 9.8 4.7-1.4 8-5.2 8-9.8V5.5l-8-3Z%27 fill=%27%236f8cff%27/%3E%3Cpath d=%27m8.5 12 2.5 2.5 4.6-5%27 stroke=%27%230f1222%27 stroke-width=%272.2%27 fill=%27none%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E">
+<meta name="theme-color" content="#1b1b1d">
+<meta name="color-scheme" content="dark">
+<style>
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body { background: #1b1b1d; color: #ececec; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 12px; padding: 16px 20px 12px; }
+header svg { width: 26px; height: 26px; }
+header h1 { font-size: 19px; font-weight: 600; letter-spacing: .2px; }
+header .count { margin-left: auto; color: #9a9a9a; font-size: 13px; }
+.add { display: flex; gap: 8px; padding: 0 20px 14px; }
+.add input { flex: 1; height: 36px; border-radius: 8px; border: 1px solid #3a3a3e; background: #242427; color: #f2f2f2; padding: 0 12px; font: inherit; outline: none; }
+.add input:focus { border-color: #6f8cff; box-shadow: 0 0 0 3px rgba(111,140,255,.18); }
+.add input::placeholder { color: #7c7c80; }
+.add button { height: 36px; padding: 0 16px; border: 0; border-radius: 8px; background: #6f8cff; color: #0f1222; font: 600 14px "Segoe UI", sans-serif; }
+.board { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 0 20px 20px; min-height: 0; }
+.col { background: #222225; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.col h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: #a5a5aa; display: flex; justify-content: space-between; margin-bottom: 2px; }
+.card { background: #2c2c30; border-radius: 8px; padding: 10px 11px; font-size: 13.5px; }
+.card small { display: flex; gap: 6px; align-items: center; margin-top: 6px; color: #8e8e94; font-size: 12px; }
+.tag { padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+.bug { background: rgba(255,110,110,.16); color: #ff9a9a; }
+.ui { background: rgba(111,140,255,.18); color: #a9bbff; }
+.chore { background: rgba(150,150,150,.18); color: #c4c4c4; }
+.done .card { color: #8f8f94; text-decoration: line-through; text-decoration-color: #5d5d62; }
+.bad { color: #ff9a9a; }
+</style></head>
+<body>
+<header>
+  <svg viewBox="0 0 24 24" fill="none"><path d="M12 2.5 4 5.5v6.2c0 4.6 3.3 8.4 8 9.8 4.7-1.4 8-5.2 8-9.8V5.5l-8-3Z" fill="#6f8cff"/><path d="m8.5 12 2.5 2.5 4.6-5" stroke="#0f1222" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <h1>Quest Log</h1>
+  <span class="count">7 open, 3 done</span>
+</header>
+<div class="add"><input id="q" placeholder="New quest..." autocomplete="off"><button>Add</button></div>
+<main class="board">
+  <section class="col"><h2>Open <span>4</span></h2>
+    <div class="card">Drawbridge button does nothing on small screens<small><span class="tag bug">bug</span>since Tuesday</small></div>
+    <div class="card">Sort quests by due date<small><span class="tag ui">ui</span></small></div>
+    <div class="card">Empty state for a log without quests<small><span class="tag ui">ui</span></small></div>
+    <div class="card">Rename "Save" to "Keep"<small><span class="tag chore">chore</span></small></div>
+  </section>
+  <section class="col"><h2>Doing <span>3</span></h2>
+    <div class="card">Dark mode for the settings page<small><span class="tag ui">ui</span>half done</small></div>
+    <div class="card">Total gold shows NaN after a reload<small><span class="tag bug">bug</span><span class="bad">needs a look</span></small></div>
+    <div class="card">Tests for the loot table<small><span class="tag chore">chore</span></small></div>
+  </section>
+  <section class="col done"><h2>Done <span>3</span></h2>
+    <div class="card">Login remembers the last knight</div>
+    <div class="card">Icons for every quest type</div>
+    <div class="card">Fix the typo in "Treasure"</div>
+  </section>
+</main>
+</body></html>

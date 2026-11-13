@@ -26,10 +26,11 @@ KnightSight is a small portable program for Windows. You click a window or drag 
 
 1. [Download](#1-download)
 2. [Support](#2-support)
-3. [What it does](#3-what-it-does)
-4. [Getting started](#4-getting-started)
-5. [Building from source](#5-building-from-source)
-6. [How AI is used here](#6-how-ai-is-used-here)
+3. [What it looks like](#3-what-it-looks-like)
+4. [What it does](#4-what-it-does)
+5. [Getting started](#5-getting-started)
+6. [Building from source](#6-building-from-source)
+7. [How AI is used here](#7-how-ai-is-used-here)
 
 <br>
 
@@ -72,7 +73,32 @@ If it has earned a place on your computer, toss a coin to your knight: it helps 
 
 <br>
 
-<p><a id="3-what-it-does" href="#3-what-it-does"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/3-what-it-does-dark.svg"><img src=".github/assets/sections/3-what-it-does.svg" alt="3. What it does" width="100%"></picture></a></p>
+<p><a id="3-what-it-looks-like" href="#3-what-it-looks-like"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/3-what-it-looks-like-dark.svg"><img src=".github/assets/sections/3-what-it-looks-like.svg" alt="3. What it looks like" width="100%"></picture></a></p>
+
+The app and the quests in these pictures are made up.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/pick.png" alt="A made-up to-do app in a grey frame next to the KnightSight panel, which names the chosen window and says it is not shared yet" width="100%">
+  <br><em>Choose a window and a grey frame marks it. KnightSight shares nothing until you click Start sharing.</em>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/share.png" alt="The same app in a yellow frame with a label reading Taking a screenshot above its corner, and the panel showing the same activity next to a Stop sharing button" width="100%">
+  <br><em>Once shared, the frame turns yellow. It pulses while the assistant works, and a label at its corner says what it's doing.</em>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/region.png" alt="A yellow frame around part of the to-do app while text appears in its input field, a label reading Typing, and the panel showing Region 585 x 364" width="100%">
+  <br><em>Drag a rectangle to share part of the screen. Here the assistant types into the field inside the box.</em>
+</p>
+
+<br>
+
+<p><a id="4-what-it-does" href="#4-what-it-does"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/4-what-it-does-dark.svg"><img src=".github/assets/sections/4-what-it-does.svg" alt="4. What it does" width="100%"></picture></a></p>
 
 - **You pick what it sees.** Click a window or drag a rectangle over part of the screen. A grey frame marks your pick, and it turns yellow once you start sharing.
 - **Six tools for the assistant.** `look` takes a picture, `click`, `scroll`, `type` and `key` act inside the share, and `steps` runs several of them in one go with a picture at the end if asked.
@@ -85,7 +111,7 @@ If it has earned a place on your computer, toss a coin to your knight: it helps 
 
 <br>
 
-<p><a id="4-getting-started" href="#4-getting-started"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/4-getting-started-dark.svg"><img src=".github/assets/sections/4-getting-started.svg" alt="4. Getting started" width="100%"></picture></a></p>
+<p><a id="5-getting-started" href="#5-getting-started"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/5-getting-started-dark.svg"><img src=".github/assets/sections/5-getting-started.svg" alt="5. Getting started" width="100%"></picture></a></p>
 
 1. Download `KnightSight.exe` and `knightsight-mcp.mjs` from the [latest release](https://github.com/junkerderprovinz/knightsight/releases/latest).
 2. Start `KnightSight.exe`, choose a window or a region and click **Start sharing**.
@@ -126,7 +152,7 @@ The Windows machine needs the OpenSSH server, and the login has to work with a k
 
 <br>
 
-<p><a id="5-building-from-source" href="#5-building-from-source"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/5-building-from-source-dark.svg"><img src=".github/assets/sections/5-building-from-source.svg" alt="5. Building from source" width="100%"></picture></a></p>
+<p><a id="6-building-from-source" href="#6-building-from-source"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/6-building-from-source-dark.svg"><img src=".github/assets/sections/6-building-from-source.svg" alt="6. Building from source" width="100%"></picture></a></p>
 
 ```powershell
 .\build.ps1
@@ -136,7 +162,7 @@ The script compiles `src\KnightSight.cs` with the .NET Framework compiler that c
 
 <br>
 
-<p><a id="6-how-ai-is-used-here" href="#6-how-ai-is-used-here"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/6-how-ai-is-used-here-dark.svg"><img src=".github/assets/sections/6-how-ai-is-used-here.svg" alt="6. How AI is used here" width="100%"></picture></a></p>
+<p><a id="7-how-ai-is-used-here" href="#7-how-ai-is-used-here"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/7-how-ai-is-used-here-dark.svg"><img src=".github/assets/sections/7-how-ai-is-used-here.svg" alt="7. How AI is used here" width="100%"></picture></a></p>
 
 One knight builds this, and AI is one of the tools I work with, the same way I work with an editor or a compiler. It helps me write code and documentation and it checks my work, and that saves me a good many evenings. It does not make the decisions, though. I read and understand everything before it ships, and if something here breaks, that is on me and not on the tool.
 
