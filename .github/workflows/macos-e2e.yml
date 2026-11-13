@@ -1,0 +1,42 @@
+name: macOS end to end
+
+# Runs KnightSight.app on the runner's desktop: shares a window through the panel and works
+# in it through the MCP server. The pictures it took and its log stay as an artifact.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "macos/**"
+      - "mcp/**"
+      - ".github/workflows/macos-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Build KnightSight.app
+        run: macos/build.sh
+
+      - name: Allow screen recording and input
+        run: sh macos/e2e/grant.sh macos/dist/KnightSight.app
+
+      - name: Share a window and work in it
+        run: sh macos/e2e/run.sh e2e
+
+      - name: Picture of the whole screen
+        if: always()
+        run: screencapture -x e2e/screen.png
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: knightsight-macos-e2e
+          path: e2e
+          if-no-files-found: error
