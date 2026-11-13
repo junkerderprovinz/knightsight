@@ -138,6 +138,12 @@ func text(of pid: pid_t, _ name: String = kAXValueAttribute) -> String? {
     textArea(of: pid).flatMap { attribute($0, name) as? String }
 }
 
+func selection(of pid: pid_t) -> CFRange? {
+    guard let area = textArea(of: pid), let value = attribute(area, kAXSelectedTextRangeAttribute) else { return nil }
+    var range = CFRange()
+    return AXValueGetValue(value as! AXValue, .cfRange, &range) ? range : nil
+}
+
 struct Rgb: CustomStringConvertible {
     let r: Int, g: Int, b: Int
     var description: String { "(\(r), \(g), \(b))" }
@@ -325,6 +331,10 @@ func run(_ mcp: Mcp) throws {
     let arrived = try? wait("the text", 5) { text(of: shared.pid) == hello ? true : nil }
     check(arrived ?? false, "the typed text arrives in the target", "the text area holds \(text(of: shared.pid) ?? "nothing")")
     try save(try mcp.tool("look"), "3-typed.png")
+    say("      selection before the click \(String(describing: selection(of: shared.pid)))")
+    _ = try mcp.tool("click", ["x": Double(inPicture(2, 111).x), "y": Double(inPicture(2, 111).y)])
+    let caret = try? wait("the caret", 3) { selection(of: shared.pid)?.location == 0 ? true : nil }
+    check(caret ?? false, "a click at the start of the text puts the caret there", "the selection is \(String(describing: selection(of: shared.pid)))")
 
     let all = try mcp.tool("key", ["keys": "cmd+a"])
     check(!all.isError, "cmd+a is done", all.text)
@@ -365,7 +375,10 @@ func run(_ mcp: Mcp) throws {
     say("      clicks seen: \(events().filter { $0.contains("click") }.joined(separator: ", "))")
     _ = try mcp.tool("key", ["keys": "cmd+a"])
     let selectedInFront = try? wait("the selection", 3) { (text(of: shared.pid, kAXSelectedTextAttribute) ?? "").isEmpty ? nil : true }
-    say("      with the target in front cmd+a selects: \(selectedInFront ?? false)")
+    say("      with the target in front cmd+a selects: \(selectedInFront ?? false), \(String(describing: selection(of: shared.pid)))")
+    _ = try mcp.tool("click", ["x": Double(inPicture(2, 111).x), "y": Double(inPicture(2, 111).y)])
+    usleep(500_000)
+    say("      with the target in front a click collapses the selection: \(String(describing: selection(of: shared.pid)))")
     _ = try mcp.tool("click", ["x": Double(inPicture(80, 180).x), "y": Double(inPicture(80, 180).y)])
     usleep(500_000)
     say("      with the target in front the click at 80 180 arrives: \(events().contains("Target click 80 180"))")
