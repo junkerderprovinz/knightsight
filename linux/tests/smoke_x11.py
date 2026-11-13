@@ -54,7 +54,7 @@ def wait_for(check, what, seconds=15):
 def window(name):
     def find():
         try:
-            return run("xdotool", "search", "--name", f"^{name}$").split()[0]
+            return run("xdotool", "search", "--onlyvisible", "--name", f"^{name}$").split()[0]
         except subprocess.CalledProcessError:
             return None
     return wait_for(find, f"the window {name}")
@@ -156,6 +156,7 @@ class SmokeX11(unittest.TestCase):
         if cls.panel.poll() is not None:
             raise AssertionError(f"the panel exited with {cls.panel.returncode}")
         cls.panel_id = window("KnightSight")
+        time.sleep(1)
         cls.mcp = Mcp()
 
     @classmethod
@@ -178,12 +179,31 @@ class SmokeX11(unittest.TestCase):
         return px + x, py + y
 
     def choose_window(self, title):
-        press(*self.panel_point(110, 156))
+        """Clicks Choose window and then the window, again if a slow runner missed it, until
+        the grey frame shows up beside the window."""
         tx, ty = origin(window(title))
-        press(tx + 200, ty + 150)
+
+        def framed():
+            r, g, b = screen_pixel(tx - 2, ty + 150)
+            return r == g == b and 120 < r < 160
+
+        for _ in range(3):
+            press(*self.panel_point(110, 156))
+            press(tx + 200, ty + 150)
+            try:
+                return wait_for(framed, "the grey frame", 5)
+            except AssertionError:
+                pass
+        raise AssertionError(f"{title} could not be chosen")
 
     def start_sharing(self):
-        press(*self.panel_point(456, 156))
+        for _ in range(3):
+            press(*self.panel_point(456, 156))
+            try:
+                return wait_for(lambda: NOTHING not in text_of(self.mcp.tool("look")), "the share to start", 5)
+            except AssertionError:
+                pass
+        raise AssertionError("sharing did not start")
 
     def test_window_share(self):
         self.assertIn(NOTHING, text_of(self.mcp.tool("look")))
@@ -235,7 +255,7 @@ class SmokeX11(unittest.TestCase):
         wait_for(lambda: NOTHING in text_of(self.mcp.tool("look")), "the hotkey to end the share", 5)
 
         press(*self.panel_point(266, 156))
-        time.sleep(0.5)
+        time.sleep(2)
         drag(100, 100, 300, 250)
         self.start_sharing()
         region = self.mcp.tool("look")
