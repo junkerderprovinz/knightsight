@@ -201,14 +201,15 @@ func run(_ mcp: Mcp) throws {
     say("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), main display \(Int(screen.width)) x \(Int(screen.height))")
     try expect(AXIsProcessTrusted(), "the driver may read other apps through accessibility")
 
-    try spawn(targetPath, ["Target", "ff0000", "40", "80", eventsPath])
-    var shared = try window("Target")
-    try expect(shared.bounds.width == 400, "the target is 400 points wide", "\(shared.bounds)")
-    let titleBar = shared.bounds.height - 300
-
     try spawn("/usr/bin/open", ["--stdout", out.appendingPathComponent("app.log").path,
                                 "--stderr", out.appendingPathComponent("app.log").path, appPath]).waitUntilExit()
     let panel = try window("KnightSight", owner: "KnightSight")
+
+    // Below the panel, which opens in the middle of the screen, so neither hides the other.
+    try spawn(targetPath, ["Target", "ff0000", "40", "\(Int(panel.bounds.maxY) + 20)", eventsPath])
+    var shared = try window("Target")
+    try expect(shared.bounds.width == 400, "the target is 400 points wide", "\(shared.bounds)")
+    let titleBar = shared.bounds.height - 300
     say("      panel at \(panel.bounds), target at \(shared.bounds)")
     func onPanel(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: panel.bounds.minX + x, y: panel.bounds.minY + y) }
     func edges() -> [Win] { onScreen().filter { $0.pid == panel.pid && min($0.bounds.width, $0.bounds.height) <= 8 } }
