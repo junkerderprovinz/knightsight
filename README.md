@@ -102,11 +102,7 @@ If it has earned a place on your computer, toss a coin to your knight: it helps 
 }
 ```
 
-Clients with a command line usually take one line instead. With Claude Code it looks like this:
-
-```
-claude mcp add --scope user knightsight -- node C:\Tools\knightsight-mcp.mjs
-```
+Clients with a command line usually have an `mcp add` command that takes the same name and command in one line.
 
 Then ask your assistant to take a look. While nothing is shared, it gets a short note saying so and nothing else.
 
