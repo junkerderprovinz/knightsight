@@ -354,7 +354,7 @@ func run(_ mcp: Mcp) throws {
     mouse(.mouseMoved, spot(40, 140))
     usleep(200_000)
     probe(shared, at: spot(40, 140), aim: false)
-    press(band)
+    press(spot(20, 50))
     say("      target in front: \(frontmost() == "Target")")
     probe(shared, at: spot(50, 150), aim: true)
     probe(shared, at: spot(60, 160), aim: false)
