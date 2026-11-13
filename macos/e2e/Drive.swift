@@ -67,8 +67,16 @@ func frontmost() -> String {
 
 var pointer: CGPoint { CGEvent(source: nil)!.location }
 
+// Events from a source with the hardware's state ID count toward that state, which the
+// panel reads to notice the click that picks a window.
+let hardware = CGEventSource(stateID: .hidSystemState)
+
 func mouse(_ type: CGEventType, _ p: CGPoint) {
-    CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!.post(tap: .cghidEventTap)
+    CGEvent(mouseEventSource: hardware, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!.post(tap: .cghidEventTap)
+}
+
+func buttonStates() -> String {
+    "hid \(CGEventSource.buttonState(.hidSystemState, button: .left)), session \(CGEventSource.buttonState(.combinedSessionState, button: .left)), pressedMouseButtons \(NSEvent.pressedMouseButtons)"
 }
 
 /// A slow click, so the panel's poll of the mouse button sees it go down and up.
@@ -77,6 +85,7 @@ func press(_ p: CGPoint) {
     usleep(200_000)
     mouse(.leftMouseDown, p)
     usleep(150_000)
+    say("      button held at \(p): \(buttonStates())")
     mouse(.leftMouseUp, p)
     usleep(400_000)
 }
