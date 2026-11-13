@@ -70,6 +70,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="1.1.0" date="2026-11-13">
+      <description>
+        <p>KnightSight comes to Linux and macOS, with the same MCP server for every system.</p>
+      </description>
+      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.1.0</url>
+    </release>
     <release version="1.0.0" date="2026-11-13">
       <description>
         <p>The first release of KnightSight: one window or one screen region, shared with a coding assistant and nothing else.</p>

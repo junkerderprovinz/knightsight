@@ -13,4 +13,9 @@ BUTTONS = {
     # (.github/workflows/release.yml attaches it to every release).
     "windows": RELEASE + "KnightSight.exe",
     "windows-arm": RELEASE + "KnightSight.exe",
+    "macos": RELEASE + "knightsight-macos-universal.zip",
+    "linux": RELEASE + "knightsight-linux-amd64.zip",
+    "linux-arm": RELEASE + "knightsight-linux-arm64.zip",
+    "flatpak": RELEASE + "knightsight-linux-amd64.flatpak",
+    "flatpak-arm": RELEASE + "knightsight-linux-arm64.flatpak",
 }

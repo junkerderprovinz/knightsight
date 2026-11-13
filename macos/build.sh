@@ -17,9 +17,12 @@ rm -rf dist "$work/KnightSight.iconset"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Fonts" "$work"
 cp "$bin/KnightSight" "$app/Contents/MacOS/"
 cp Info.plist "$app/Contents/"
-if [ -n "${KNIGHTSIGHT_VERSION:-}" ]; then
-  plutil -replace CFBundleShortVersionString -string "$KNIGHTSIGHT_VERSION" "$app/Contents/Info.plist"
-  plutil -replace CFBundleVersion -string "$KNIGHTSIGHT_VERSION" "$app/Contents/Info.plist"
+# A tag name such as v1.1.0 works too.
+version=${KNIGHTSIGHT_VERSION:-}
+version=${version#v}
+if [ -n "$version" ]; then
+  plutil -replace CFBundleShortVersionString -string "$version" "$app/Contents/Info.plist"
+  plutil -replace CFBundleVersion -string "$version" "$app/Contents/Info.plist"
 fi
 
 for name in NotoSans-Regular.ttf NotoSans-SemiBold.ttf; do
