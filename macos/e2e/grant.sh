@@ -14,7 +14,7 @@ csrutil status || true
 echo "columns of access:"
 sudo sqlite3 "$system" "PRAGMA table_info(access)"
 
-requirement=$(codesign -d -r- "$app" 2>&1 | sed -n 's/^designated => //p')
+requirement=$(codesign -d -r- "$app" 2>&1 | sed -En 's/^(# )?designated => //p')
 echo "designated requirement: $requirement"
 work=$(mktemp -d)
 echo "$requirement" | csreq -r- -b "$work/requirement"
