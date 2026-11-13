@@ -31,6 +31,33 @@ func expect(_ ok: Bool, _ what: String, _ detail: @autoclosure () -> String = ""
     say("ok    \(what)")
 }
 
+var failures = 0
+
+func check(_ ok: Bool, _ what: String, _ detail: @autoclosure () -> String = "") {
+    if ok {
+        say("ok    \(what)")
+    } else {
+        say("fail  \(what): \(detail())")
+        failures += 1
+    }
+}
+
+/// Posts a click and a key to the window's process directly, with the given event source.
+func probe(_ w: Win, at p: CGPoint, key: CGKeyCode, source: CGEventSource?) {
+    for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+        let e = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!
+        e.setIntegerValueField(.mouseEventClickState, value: 1)
+        e.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(w.id))
+        e.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(w.id))
+        e.postToPid(w.pid)
+        usleep(30_000)
+    }
+    for down in [true, false] {
+        CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)!.postToPid(w.pid)
+    }
+    usleep(500_000)
+}
+
 func wait<T>(_ what: String, _ seconds: Double = 15, _ probe: () throws -> T?) throws -> T {
     let end = Date().addingTimeInterval(seconds)
     repeat {
@@ -289,46 +316,54 @@ func run(_ mcp: Mcp) throws {
     say("      pointer rests at \(rest)")
 
     let click = try mcp.tool("click", ["x": Double(inPicture(200, 150).x), "y": Double(inPicture(200, 150).y)])
-    try expect(!click.isError && click.text == "Clicked.", "click is done", click.text)
-    try expect((try? wait("the click", 5) { events().contains("Target click 200 150") ? true : nil }) ?? false,
+    check(!click.isError && click.text == "Clicked.", "click is done", click.text)
+    check((try? wait("the click", 5) { events().contains("Target click 200 150") ? true : nil }) ?? false,
                "the click lands in the text area at the point aimed at", events().suffix(5).joined(separator: ", "))
 
     let hello = "Hello from KnightSight"
     let typed = try mcp.tool("type", ["text": hello])
-    try expect(!typed.isError, "type is done", typed.text)
+    check(!typed.isError, "type is done", typed.text)
     let arrived = try? wait("the text", 5) { text(of: shared.pid) == hello ? true : nil }
-    try expect(arrived ?? false, "the typed text arrives in the target", "the text area holds \(text(of: shared.pid) ?? "nothing")")
+    check(arrived ?? false, "the typed text arrives in the target", "the text area holds \(text(of: shared.pid) ?? "nothing")")
     try save(try mcp.tool("look"), "3-typed.png")
 
     let all = try mcp.tool("key", ["keys": "cmd+a"])
-    try expect(!all.isError, "cmd+a is done", all.text)
+    check(!all.isError, "cmd+a is done", all.text)
     let selected = try? wait("the selection", 5) { text(of: shared.pid, kAXSelectedTextAttribute) == hello ? true : nil }
-    try expect(selected ?? false, "cmd+a selects the whole text", "the selection is \(text(of: shared.pid, kAXSelectedTextAttribute) ?? "nothing")")
+    check(selected ?? false, "cmd+a selects the whole text", "the selection is \(text(of: shared.pid, kAXSelectedTextAttribute) ?? "nothing")")
     _ = try mcp.tool("type", ["text": "Replaced"])
     let replaced = try? wait("the replacement", 5) { text(of: shared.pid) == "Replaced" ? true : nil }
-    try expect(replaced ?? false, "typing over the selection replaces it", "the text area holds \(text(of: shared.pid) ?? "nothing")")
+    check(replaced ?? false, "typing over the selection replaces it", "the text area holds \(text(of: shared.pid) ?? "nothing")")
     try save(try mcp.tool("look"), "4-replaced.png")
 
     let outside = try mcp.tool("click", ["x": size.pixelsWide + 20, "y": 10])
-    try expect(outside.isError && outside.text.contains("outside the share"), "a click outside the share is refused", outside.text)
+    check(outside.isError && outside.text.contains("outside the share"), "a click outside the share is refused", outside.text)
     let windowsKey = try mcp.tool("key", ["keys": "win+r"])
-    try expect(windowsKey.isError && windowsKey.text.contains("no Windows key"), "the Windows key is refused", windowsKey.text)
+    check(windowsKey.isError && windowsKey.text.contains("no Windows key"), "the Windows key is refused", windowsKey.text)
 
-    try expect(pointer == rest, "the pointer did not move", "it is at \(pointer), it rested at \(rest)")
-    try expect(frontmost() == "Other", "the covering window stayed in front", frontmost())
-    try expect(events().filter { $0.hasPrefix("Other") }.count == otherEvents, "nothing reached the covering window",
+    check(pointer == rest, "the pointer did not move", "it is at \(pointer), it rested at \(rest)")
+    check(frontmost() == "Other", "the covering window stayed in front", frontmost())
+    check(events().filter { $0.hasPrefix("Other") }.count == otherEvents, "nothing reached the covering window",
                events().filter { $0.hasPrefix("Other") }.joined(separator: ", "))
+
+    probe(shared, at: CGPoint(x: shared.bounds.minX + 10, y: shared.bounds.minY + titleBar + 110), key: 0x00, source: nil)
+    probe(shared, at: CGPoint(x: shared.bounds.minX + 20, y: shared.bounds.minY + titleBar + 120), key: 0x0B,
+          source: CGEventSource(stateID: .privateState))
+    probe(shared, at: CGPoint(x: shared.bounds.minX + 30, y: shared.bounds.minY + titleBar + 130), key: 0x08,
+          source: CGEventSource(stateID: .hidSystemState))
+    say("      after the probes (a: no source, b: private, c: hid): \(events().joined(separator: ", "))")
 
     keys(7, [.maskControl, .maskAlternate, .maskShift])
     let ended = try? wait("the hotkey to end the share", 5) { try mcp.tool("look").text.contains(nothingShared) ? true : nil }
-    try expect(ended ?? false, "ctrl+option+shift+x ends the share")
+    check(ended ?? false, "ctrl+option+shift+x ends the share")
 }
 
 let mcp = try Mcp(mcpPath)
 var failed = false
 do {
     try run(mcp)
-    say("all checks passed")
+    say(failures == 0 ? "all checks passed" : "\(failures) checks failed")
+    failed = failures > 0
 } catch let failure as Failure {
     say("fail  \(failure.message)")
     failed = true
