@@ -347,7 +347,12 @@ func run(_ mcp: Mcp) throws {
 
     func lastScroll() -> Int? { events().compactMap { $0.hasPrefix("Target scrolled ") ? Int($0.dropFirst(16)) : nil }.last }
     _ = try mcp.tool("type", ["text": String(repeating: "\nline", count: 30)])
-    let bottom = try? wait("the text to scroll down while typing", 5) { lastScroll().flatMap { $0 > 0 ? $0 : nil } }
+    // The view keeps following the caret for a moment after the typing, so the baseline waits until it rests.
+    let bottom = try? wait("the text to stop scrolling after typing", 8) { () -> Int? in
+        guard let first = lastScroll(), first > 0 else { return nil }
+        Thread.sleep(forTimeInterval: 0.5)
+        return lastScroll() == first ? first : nil
+    }
     let wheel = try mcp.tool("scroll", at(200, 150).merging(["amount": -3]) { $1 })
     check(wheel.text == "Scrolled, briefly in the foreground.", "scroll is done in the foreground for a moment", wheel.text)
     let up = try? wait("the text to scroll up", 3) { bottom.flatMap { b in lastScroll().flatMap { $0 < b ? true : nil } } }
