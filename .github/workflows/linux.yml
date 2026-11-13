@@ -1,0 +1,133 @@
+name: Linux
+
+# Builds and tests the Linux app on x64 and ARM: the plain zip after the unit tests and an
+# X11 smoke test, and the Flatpak bundle. Like the Flatpak workflows of the other apps it
+# attaches nothing; release.yml calls it on a tag and puts the four files on the release.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "linux/**"
+      - "mcp/**"
+      - ".github/workflows/linux.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  plain:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            slug: linux-amd64
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install GTK, GStreamer and the X11 test tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 gstreamer1.0-pipewire \
+            xvfb xauth openbox xdotool python3-tk fonts-noto-core zip
+
+      - name: Unit tests
+        run: /usr/bin/python3 -m unittest discover -s linux/tests -v
+
+      - name: Check the MCP server
+        run: node --check mcp/knightsight-mcp.mjs
+
+      - name: Smoke test on X11
+        env:
+          GTK_A11Y: none
+        run: PATH=/usr/bin:$PATH sh linux/tests/smoke-x11.sh
+
+      - name: Package
+        run: PATH=/usr/bin:$PATH sh linux/package.sh knightsight-${{ matrix.slug }}.zip
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: knightsight-${{ matrix.slug }}.zip
+          path: knightsight-${{ matrix.slug }}.zip
+          if-no-files-found: error
+
+  flatpak:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            slug: linux-amd64
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # The GNOME SDK and flatpak-builder, in the image Flathub keeps for this.
+    # bubblewrap needs the privileges a default container lacks.
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51@sha256:78d969b18225ae107ca29497bf09c4a3f791e5f1838a9a912a529d0024fb6210
+      options: --privileged
+    env:
+      ID: io.github.junkerderprovinz.knightsight
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The bundle takes its version from the newest release in the metainfo,
+      # so a tag without its entry would ship under the version before it.
+      - name: Check the release entry
+        if: github.ref_type == 'tag'
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          newest=$(sed -n 's|.*<release version="\([^"]*\)".*|\1|p' linux/data/$ID.metainfo.xml | head -1)
+          if [ "$newest" != "$version" ]; then
+            echo "::error::the newest release in the metainfo is $newest, the tag says $version"
+            exit 1
+          fi
+
+      - name: Check the metainfo
+        run: flatpak-builder-lint appstream linux/data/$ID.metainfo.xml
+
+      - name: Build
+        run: |
+          flatpak-builder --disable-rofiles-fuse --install-deps-from=flathub --force-clean \
+            --state-dir=linux/flatpak/.state --repo=linux/flatpak/.repo \
+            linux/flatpak/.build linux/flatpak/$ID.yml
+
+      # The runtime comes from Flathub, which the bundle names, so installing
+      # the file pulls it in.
+      - name: Bundle
+        run: |
+          flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            linux/flatpak/.repo knightsight-${{ matrix.slug }}.flatpak $ID
+
+      # The panel needs Python, GTK, GStreamer and the PipeWire source from the runtime,
+      # so the installed bundle has to load every module and find pipewiresrc.
+      - name: Check the bundle
+        run: |
+          set -eu
+          flatpak install --user -y --noninteractive knightsight-${{ matrix.slug }}.flatpak
+          flatpak run --command=python3 $ID -c '
+          import sys
+          sys.path.insert(0, "/app/lib")
+          import gi
+          for name, version in (("Gtk", "4.0"), ("Gdk", "4.0"), ("PangoCairo", "1.0"), ("Gst", "1.0")):
+              gi.require_version(name, version)
+          from knightsight import panel, portal, x11
+          from gi.repository import Gst
+          assert Gst.ElementFactory.find("pipewiresrc"), "no pipewiresrc in the runtime"
+          print("modules and pipewiresrc load")
+          '
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: knightsight-${{ matrix.slug }}.flatpak
+          path: knightsight-${{ matrix.slug }}.flatpak
+          if-no-files-found: error
