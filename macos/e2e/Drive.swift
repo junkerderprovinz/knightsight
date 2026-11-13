@@ -41,7 +41,7 @@ func wait<T>(_ what: String, _ seconds: Double = 15, _ probe: () throws -> T?) t
 }
 
 struct Win {
-    let id: CGWindowID, pid: pid_t, layer: Int, bounds: CGRect, name: String, owner: String
+    let id: CGWindowID, pid: pid_t, layer: Int, bounds: CGRect, name: String, owner: String, alpha: Double
 }
 
 /// Front to back.
@@ -53,7 +53,8 @@ func onScreen() -> [Win] {
               let bounds = CGRect(dictionaryRepresentation: box as CFDictionary)
         else { return nil }
         return Win(id: id, pid: pid, layer: layer, bounds: bounds,
-                   name: e[kCGWindowName as String] as? String ?? "", owner: e[kCGWindowOwnerName as String] as? String ?? "")
+                   name: e[kCGWindowName as String] as? String ?? "", owner: e[kCGWindowOwnerName as String] as? String ?? "",
+                   alpha: e[kCGWindowAlpha as String] as? Double ?? 1)
     }
 }
 
@@ -76,7 +77,7 @@ func mouse(_ type: CGEventType, _ p: CGPoint) {
 }
 
 func buttonStates() -> String {
-    "hid \(CGEventSource.buttonState(.hidSystemState, button: .left)), session \(CGEventSource.buttonState(.combinedSessionState, button: .left)), pressedMouseButtons \(NSEvent.pressedMouseButtons)"
+    "hid \(CGEventSource.buttonState(.hidSystemState, button: .left)), session \(CGEventSource.buttonState(.combinedSessionState, button: .left)), pressedMouseButtons \(NSEvent.pressedMouseButtons), mouseLocation \(NSEvent.mouseLocation)"
 }
 
 /// A slow click, so the panel's poll of the mouse button sees it go down and up.
@@ -241,6 +242,9 @@ func run(_ mcp: Mcp) throws {
         if attempt > 1 { press(onPanel(110, 156)) }
         press(band)
         snap("choose-\(attempt).png")
+        for w in onScreen() where w.bounds.contains(band) {
+            say("      under the click: \(w.owner) \"\(w.name)\" layer \(w.layer) alpha \(w.alpha) \(w.bounds)")
+        }
         chosen = (try? wait("the frame", 5) { edges().count == 4 ? true : nil }) ?? false
     }
     try expect(chosen, "choosing the target through the panel draws the frame")
