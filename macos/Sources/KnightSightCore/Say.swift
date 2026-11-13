@@ -34,6 +34,7 @@ public struct Say {
     public var typing: String { pick("Typing", "Tippe") }
     public var pressing: String { pick("Pressing ", "Drücke ") }
     public var pressingKey: String { pick("Pressing a key", "Drücke Taste") }
+    public var waiting: String { pick("Waiting for a quiet moment", "Warte auf einen ruhigen Moment") }
 
     /// The line the panel shows while macOS still holds back a permission.
     public func allow(screen: Bool, input: Bool) -> String {
@@ -58,15 +59,17 @@ public struct Say {
             "Grey frame: chosen, not shared yet.\n" +
                 "Yellow frame: shared. Looking, clicking and typing happen\nonly inside it, and only when asked.\n" +
                 "A pulsing frame means something is being done in there. Its top\nright corner says what, such as \"Typing\" or \"Taking a screenshot\".\n\n" +
-                "Carry on working as usual. Mouse and keyboard stay\nwith you, even while the window is covered.\n" +
-                "A window that is minimized, hidden or on another desktop is out\nof reach. Some apps ignore clicks and keys while in the background.\n\n" +
+                "Carry on working as usual. Typing reaches the window even while\nit is covered. For a click, a scroll or a shortcut with Cmd, the window\n" +
+                "comes to the front once mouse and keyboard rest for about a second.\nAfterwards your own window and pointer go back to where they were.\n" +
+                "A window that is minimized, hidden or on another desktop is out of reach.\n\n" +
                 "KnightSight needs Screen Recording and Accessibility, both\nunder System Settings, Privacy & Security.\n\n" +
                 "Ctrl+Option+Shift+X ends the share at once,\nand so does closing this window.",
             "Grauer Rahmen: gewählt, aber noch nicht freigegeben.\n" +
                 "Gelber Rahmen: freigegeben. Angeschaut, geklickt und getippt\nwird nur darin, und erst auf Anfrage.\n" +
                 "Pulsiert der Rahmen, wird gerade darin gearbeitet. Was genau,\nsteht oben rechts am Rahmen, etwa „Tippe“ oder „Mache Screenshot“.\n\n" +
-                "Du kannst nebenbei normal weiterarbeiten. Maus und Tastatur\nbleiben bei dir, auch wenn das Fenster zugedeckt ist.\n" +
-                "Minimiert, ausgeblendet oder auf einem anderen Schreibtisch ist es\nnicht erreichbar. Manche Apps reagieren im Hintergrund nicht auf Klicks und Tasten.\n\n" +
+                "Du kannst nebenbei normal weiterarbeiten. Getippt wird auch, wenn\ndas Fenster zugedeckt ist. Für einen Klick, zum Scrollen oder für ein\n" +
+                "Kürzel mit Cmd kommt das Fenster kurz nach vorn, sobald du gut eine\nSekunde lang nichts eingibst. Danach sind dein Fenster und dein\nMauszeiger wieder da, wo sie waren.\n" +
+                "Minimiert, ausgeblendet oder auf einem anderen Schreibtisch ist es\nnicht erreichbar.\n\n" +
                 "KnightSight braucht Bildschirmaufnahme und Bedienungshilfen, beides\nunter Systemeinstellungen, Datenschutz & Sicherheit.\n\n" +
                 "Ctrl+Alt+Umschalt+X beendet die Freigabe sofort,\nSchließen beendet sie auch."
         )

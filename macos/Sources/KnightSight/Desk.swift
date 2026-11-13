@@ -24,6 +24,7 @@ final class Session {
     private var storedBusyUntil = Date.distantPast
     private var storedMarks: Set<CGWindowID> = []
     private var storedFocus: WindowInfo?
+    private var storedLent: (front: pid_t, holder: pid_t)?
 
     private func locked<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -57,6 +58,13 @@ final class Session {
         set { locked { storedFocus = newValue } }
     }
 
+    /// The app that was in front when a click left a menu open in the holder, which keeps the
+    /// front until the menu closes.
+    var lent: (front: pid_t, holder: pid_t)? {
+        get { locked { storedLent } }
+        set { locked { storedLent = newValue } }
+    }
+
     func began(_ doing: String) {
         locked {
             storedDoing = doing
@@ -75,10 +83,12 @@ final class MacDesk: Desk {
     let layout: KeyLayout = SystemLayout()
     private let session: Session
     private let say: Say
+    private let foreground: Foreground
 
-    init(session: Session, say: Say) {
+    init(session: Session, say: Say, foreground: Foreground) {
         self.session = session
         self.say = say
+        self.foreground = foreground
     }
 
     func currentShare() -> Share? {
@@ -116,33 +126,36 @@ final class MacDesk: Desk {
         let chosen = try current()
         let target = try self.target(at: point, in: chosen)
         if chosen.window == nil { session.focus = target }
-        session.busy()
-        Input.click(target, at: point, right: right, twice: double)
-        return "Clicked."
+        let note = try foreground.run(target, at: point) { Input.click(at: point, right: right, twice: double) }
+        return "Clicked, briefly in the foreground." + note
     }
 
     func scroll(at point: CGPoint, notches: Int) throws -> String {
         try needInput()
         let target = try self.target(at: point, in: current())
-        session.busy()
-        Input.scroll(target, at: point, notches: notches)
-        return "Scrolled."
+        let note = try foreground.run(target, at: point) { Input.scroll(at: point, notches: notches) }
+        return "Scrolled, briefly in the foreground." + note
     }
 
     func type(_ text: String) throws -> String {
         try needInput()
-        let pid = try keyTarget()
+        let target = try keyTarget()
         session.busy()
-        Input.type(text, to: pid)
+        Input.type(text, to: target.pid)
         return "Typed."
     }
 
+    // An app runs its Cmd shortcuts through the menu bar, which it does only while active.
     func press(_ combo: KeyCombo) throws -> String {
         try needInput()
-        let pid = try keyTarget()
-        session.busy()
-        Input.press(combo, to: pid)
-        return "Pressed."
+        let target = try keyTarget()
+        guard combo.modifiers.contains(.command) else {
+            session.busy()
+            Input.press(combo, to: .process(target.pid))
+            return "Pressed."
+        }
+        let note = try foreground.run(target, at: nil) { Input.press(combo, to: .system) }
+        return "Pressed, briefly in the foreground." + note
     }
 
     private func density(_ area: CGRect) -> CGFloat {
@@ -179,12 +192,12 @@ final class MacDesk: Desk {
     }
 
     // In a region keys go to the window last clicked there, wherever it has moved since.
-    private func keyTarget() throws -> pid_t {
+    private func keyTarget() throws -> WindowInfo {
         let chosen = try current()
-        if let id = chosen.window { return try window(id).pid }
-        guard let focus = session.focus, Windows.info(focus.id) != nil else {
+        if let id = chosen.window { return try window(id) }
+        guard let focus = session.focus.flatMap({ Windows.info($0.id) }) else {
             throw Refused("Keys go to the window last clicked inside the region, and nothing has been clicked there yet.")
         }
-        return focus.pid
+        return focus
     }
 }

@@ -15,6 +15,7 @@ final class Panel: NSObject, NSWindowDelegate {
     private let view: PanelView
     private let frame = Frame()
     private let badge = Badge()
+    private let foreground: Foreground
     private var hotkey: Hotkey?
     private var server: LineServer?
     private var picker: RegionPicker?
@@ -28,6 +29,7 @@ final class Panel: NSObject, NSWindowDelegate {
 
     override init() {
         view = PanelView(say: say)
+        foreground = Foreground(session: session, say: say)
         window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: PanelView.width, height: PanelView.height),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -53,7 +55,7 @@ final class Panel: NSObject, NSWindowDelegate {
         session.marks = Set((frame.edges + [badge.window]).map { CGWindowID($0.windowNumber) })
 
         hotkey = Hotkey { [weak self] in self?.stop() }
-        let responder = Responder(desk: MacDesk(session: session, say: say), say: say)
+        let responder = Responder(desk: MacDesk(session: session, say: say, foreground: foreground), say: say)
         server = try? LineServer(port: Responder.port, answer: responder.answer)
         server?.start()
         let timer = Timer(timeInterval: 1.0 / 60, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
@@ -155,6 +157,7 @@ final class Panel: NSObject, NSWindowDelegate {
         last = now
         view.advance(elapsed)
         if picking { pollPick() }
+        foreground.giveBack()
         if now.timeIntervalSince(lastPermissionCheck) > 1 {
             lastPermissionCheck = now
             checkPermissions()

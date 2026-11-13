@@ -2,31 +2,42 @@ import Carbon.HIToolbox
 import CoreGraphics
 import KnightSightCore
 
-/// Input posted straight to the process that owns the target window. It bypasses the
-/// system's input stream, so the pointer stays where the person left it and no app comes
-/// to the front.
+/// Keys go straight to the process that owns the target window, which takes them in the
+/// background and leaves the pointer and the front app alone. Clicks, wheel turns and Cmd
+/// shortcuts count only as real input, so they enter the system's input stream while
+/// Foreground holds the window in front.
 enum Input {
+    enum Route { case process(pid_t), system }
+
     // A private source carries none of the modifiers the person happens to hold down.
     private static let source = CGEventSource(stateID: .privateState)
 
-    static func click(_ target: WindowInfo, at p: CGPoint, right: Bool, twice: Bool) {
-        let button: CGMouseButton = right ? .right : .left
-        let down: CGEventType = right ? .rightMouseDown : .leftMouseDown
-        let up: CGEventType = right ? .rightMouseUp : .leftMouseUp
-        mouse(.mouseMoved, at: p, button: .left, clicks: 0, on: target).postToPid(target.pid)
-        for n in 1...(twice ? 2 : 1) {
-            mouse(down, at: p, button: button, clicks: n, on: target).postToPid(target.pid)
-            usleep(30_000)
-            mouse(up, at: p, button: button, clicks: n, on: target).postToPid(target.pid)
+    private static func post(_ event: CGEvent, _ route: Route) {
+        switch route {
+        case .process(let pid): event.postToPid(pid)
+        case .system: event.post(tap: .cghidEventTap)
         }
     }
 
-    // One notch of a wheel moves three lines, as it does on Windows.
-    static func scroll(_ target: WindowInfo, at p: CGPoint, notches: Int) {
+    static func click(at p: CGPoint, right: Bool, twice: Bool) {
+        let button: CGMouseButton = right ? .right : .left
+        let down: CGEventType = right ? .rightMouseDown : .leftMouseDown
+        let up: CGEventType = right ? .rightMouseUp : .leftMouseUp
+        post(mouse(.mouseMoved, at: p, button: .left, clicks: 0), .system)
+        for n in 1...(twice ? 2 : 1) {
+            post(mouse(down, at: p, button: button, clicks: n), .system)
+            usleep(30_000)
+            post(mouse(up, at: p, button: button, clicks: n), .system)
+        }
+    }
+
+    // One notch of a wheel moves three lines, as it does on Windows. The wheel turns where the pointer is.
+    static func scroll(at p: CGPoint, notches: Int) {
+        post(mouse(.mouseMoved, at: p, button: .left, clicks: 0), .system)
+        usleep(30_000)
         let event = CGEvent(scrollWheelEvent2Source: source, units: .line, wheelCount: 1, wheel1: Int32(-3 * notches), wheel2: 0, wheel3: 0)!
         event.location = p
-        aim(event, at: target)
-        event.postToPid(target.pid)
+        post(event, .system)
     }
 
     static func type(_ text: String, to pid: pid_t) {
@@ -50,20 +61,20 @@ enum Input {
         }
     }
 
-    static func press(_ combo: KeyCombo, to pid: pid_t) {
+    static func press(_ combo: KeyCombo, to route: Route) {
         let held = modifierKeys.filter { combo.modifiers.contains($0.modifier) }
         var flags: CGEventFlags = []
         for key in held {
             flags.insert(key.flag)
-            modifier(key.code, flags).postToPid(pid)
+            post(modifier(key.code, flags), route)
         }
         let all = flags.union(extraFlags(combo.key))
-        keyboard(combo.key, down: true, all).postToPid(pid)
+        post(keyboard(combo.key, down: true, all), route)
         usleep(15_000)
-        keyboard(combo.key, down: false, all).postToPid(pid)
+        post(keyboard(combo.key, down: false, all), route)
         for key in held.reversed() {
             flags.remove(key.flag)
-            modifier(key.code, flags).postToPid(pid)
+            post(modifier(key.code, flags), route)
         }
     }
 
@@ -101,17 +112,10 @@ enum Input {
         }
     }
 
-    private static func mouse(_ type: CGEventType, at p: CGPoint, button: CGMouseButton, clicks: Int, on target: WindowInfo) -> CGEvent {
+    private static func mouse(_ type: CGEventType, at p: CGPoint, button: CGMouseButton, clicks: Int) -> CGEvent {
         let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: button)!
         event.setIntegerValueField(.mouseEventClickState, value: Int64(clicks))
-        aim(event, at: target)
         return event
-    }
-
-    // The window server fills these in for real input, and AppKit hands the event to the window they name.
-    private static func aim(_ event: CGEvent, at target: WindowInfo) {
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(target.id))
-        event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(target.id))
     }
 }
 
