@@ -45,10 +45,6 @@ KnightSight is a small portable program for Windows. You click a window or drag 
 </p>
 <!-- /download-buttons -->
 
-<p align="center">
-One EXE for Windows 10 and 11, on x64 and on ARM. Grab <a href="https://github.com/junkerderprovinz/knightsight/releases/latest/download/knightsight-mcp.mjs"><code>knightsight-mcp.mjs</code></a> from the same release for your assistant.
-</p>
-
 <br>
 
 <p><a id="2-support" href="#2-support"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/2-support-dark.svg"><img src=".github/assets/sections/2-support.svg" alt="2. Support" width="100%"></picture></a></p>
