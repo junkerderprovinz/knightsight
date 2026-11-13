@@ -357,7 +357,8 @@ func run(_ mcp: Mcp) throws {
     check(events().filter { $0.hasPrefix("Other") }.count == otherEvents, "nothing reached the covering window",
           events().filter { $0.hasPrefix("Other") }.joined(separator: ", "))
 
-    let menu = try mcp.tool("click", at(100, 150).merging(["right": true]) { $1 })
+    let menu = try mcp.tool("click", at(100, 50).merging(["right": true]) { $1 })
+    say("      right click arrived: \(events().contains("Target right click 100 50"))")
     check(menu.text.contains("A menu is open"), "a right click that opens a menu says so", menu.text)
     usleep(500_000)
     try save(try mcp.tool("look"), "6-menu.png")

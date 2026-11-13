@@ -35,6 +35,9 @@ let band = NSView(frame: CGRect(x: 0, y: 200, width: 400, height: 100))
 band.wantsLayer = true
 band.layer?.backgroundColor = CGColor(
     srgbRed: CGFloat(rgb >> 16 & 0xFF) / 255, green: CGFloat(rgb >> 8 & 0xFF) / 255, blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
+band.menu = NSMenu()
+band.menu!.addItem(withTitle: "Red", action: nil, keyEquivalent: "")
+band.menu!.addItem(withTitle: "Blue", action: nil, keyEquivalent: "")
 let scroll = NSScrollView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
 let text = NSTextView(frame: scroll.bounds)
 text.isRichText = false
@@ -53,12 +56,13 @@ window.makeFirstResponder(text)
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 
-_ = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { event in
+_ = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { event in
     if event.type == .keyDown {
         note("key \(event.charactersIgnoringModifiers ?? "")\(event.modifierFlags.contains(.command) ? " cmd" : "")")
     } else if let content = event.window?.contentView {
         let p = content.convert(event.locationInWindow, from: nil)
-        note("click \(Int(p.x.rounded())) \(Int((content.bounds.height - p.y).rounded()))")
+        let kind = event.type == .rightMouseDown ? "right click" : "click"
+        note("\(kind) \(Int(p.x.rounded())) \(Int((content.bounds.height - p.y).rounded()))")
     }
     return event
 }
