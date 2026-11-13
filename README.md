@@ -116,7 +116,7 @@ The app and the quests in these pictures are made up.
 
 A few things work a little differently there.
 
-- **macOS 13 or newer:** KnightSight asks for Screen Recording and Accessibility the first time you share. Clicks and keys go straight to the app that owns the window, so your pointer stays put, though some apps ignore input while they sit in the background. Windows that are hidden, minimized or on another desktop stay out of reach.
+- **macOS 13 or newer:** KnightSight asks for Screen Recording and Accessibility the first time you share. It types into the shared window in the background, even while it is covered. For a click, a scroll or a shortcut with Cmd, it waits until mouse and keyboard have rested for about a second, brings the window to the front for a moment and then puts your pointer and your previous app back. If a click opens a menu, the window stays in front until the menu closes. Windows that are hidden, minimized or on another desktop stay out of reach.
 - **Linux on X11:** the frame, the label and pictures of covered windows work as on Windows. For a click or a key, KnightSight waits until you have rested for about a second, brings the shared window forward for a moment and then hands your window and pointer back.
 - **Linux on Wayland:** your desktop asks which window or screen to share and shows its own sharing indicator. KnightSight can't draw on top of other apps there, so the frame goes around its own card instead. Clicks move your real pointer and land on whatever is visible at that spot, so keep the shared window uncovered. Keys go where the keyboard focus is.
 

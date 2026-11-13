@@ -29,7 +29,7 @@ const tools = [
   },
   {
     name: 'click',
-    description: 'Clicks a point inside the share without moving the pointer or taking the focus from the person at the PC.',
+    description: 'Clicks a point inside the share. Where the system cannot click in the background, the shared window comes forward for a moment and the person gets their pointer and front window back afterwards.',
     inputSchema: {
       type: 'object',
       properties: { ...point, right: { type: 'boolean' }, double: { type: 'boolean' }, ...after },
@@ -47,7 +47,7 @@ const tools = [
   },
   {
     name: 'type',
-    description: 'Types text into the shared window without taking the focus. In a shared region it goes to the window last clicked there.',
+    description: 'Types text into the shared window. In a shared region it goes to the window last clicked there.',
     inputSchema: { type: 'object', properties: { text: { type: 'string' }, ...after }, required: ['text'] },
   },
   {
