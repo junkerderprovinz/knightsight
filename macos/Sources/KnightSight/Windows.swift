@@ -58,9 +58,17 @@ enum Windows {
         list([.optionOnScreenAboveWindow, .excludeDesktopElements], relativeTo: id)
     }
 
-    /// The frontmost window at a point, passing through KnightSight's frame and badge as clicks do.
+    /// The window a click at this point reaches, passing through KnightSight's frame and badge.
+    /// The window server answers, since the list alone has windows that clicks pass through,
+    /// such as the Dock's, which spans the whole screen above every app.
     static func front(at p: CGPoint, skipping marks: Set<CGWindowID>) -> WindowInfo? {
-        visible().first { !marks.contains($0.id) && $0.alpha > 0 && $0.bounds.contains(p) }
+        var below = 0
+        while true {
+            let hit = NSWindow.windowNumber(at: Screens.flip(p), belowWindowWithWindowNumber: below)
+            guard hit > 0 else { return nil }
+            if !marks.contains(CGWindowID(hit)) { return info(CGWindowID(hit)) }
+            below = hit
+        }
     }
 
     /// Menus, popovers and sheets the shared window has open. They are windows of their own,
@@ -72,12 +80,11 @@ enum Windows {
 
     /// Sampled on a grid, which is close enough to tell a buried window from a partly visible one.
     static func fullyCovered(_ shared: WindowInfo, skipping marks: Set<CGWindowID>) -> Bool {
-        let covers = above(shared.id).filter { !marks.contains($0.id) && $0.alpha > 0 && !isPopup($0, of: shared) }.map(\.bounds)
         let b = shared.bounds
         for i in 0..<8 {
             for j in 0..<8 {
                 let p = CGPoint(x: b.minX + (CGFloat(i) + 0.5) * b.width / 8, y: b.minY + (CGFloat(j) + 0.5) * b.height / 8)
-                if !covers.contains(where: { $0.contains(p) }) { return false }
+                if let w = front(at: p, skipping: marks), w.id == shared.id || isPopup(w, of: shared) { return false }
             }
         }
         return true
