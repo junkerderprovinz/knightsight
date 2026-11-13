@@ -28,6 +28,9 @@ final class Foreground {
         session.busy()
         act()
         usleep(150_000)
+        print("after 150 ms:", Windows.visible().filter { $0.pid == target.pid }.map { "\($0.layer) \($0.bounds)" }); fflush(stdout)
+        usleep(450_000)
+        print("after 600 ms:", Windows.visible().filter { $0.pid == target.pid }.map { "\($0.layer) \($0.bounds)" }); fflush(stdout)
         CGWarpMouseCursorPosition(pointer)
         // A menu that just opened would close as soon as another app takes the front.
         if Foreground.menuOpen(in: target.pid) {

@@ -207,7 +207,7 @@ func spawn(_ path: String, _ arguments: [String]) throws -> Process {
 }
 
 func events() -> [String] {
-    (try? String(contentsOfFile: eventsPath, encoding: .utf8))?.split(separator: "\n").map(String.init) ?? []
+    (try? String(contentsOfFile: eventsPath, encoding: .utf8))?.split(whereSeparator: \.isNewline).map(String.init) ?? []
 }
 
 func save(_ reply: ToolReply, _ name: String) throws {
@@ -343,6 +343,10 @@ func run(_ mcp: Mcp) throws {
     check(wheel.text == "Scrolled, briefly in the foreground.", "scroll is done in the foreground for a moment", wheel.text)
     let up = try? wait("the text to scroll up", 3) { bottom.flatMap { b in lastScroll().flatMap { $0 < b ? true : nil } } }
     check(up ?? false, "the wheel scrolls the text up", "it was at \(bottom.map(String.init) ?? "the top"), it is at \(lastScroll().map(String.init) ?? "the top")")
+    let before = lastScroll() ?? 0
+    _ = try mcp.tool("scroll", at(200, 150).merging(["amount": 1]) { $1 })
+    let down = try? wait("the text to scroll down", 3) { (lastScroll() ?? 0) > before ? true : nil }
+    check(down ?? false, "a positive amount scrolls the text down", "it was at \(before), it is at \(lastScroll() ?? 0)")
     settled(after: "the scroll")
     try save(try mcp.tool("look"), "5-scrolled.png")
 
