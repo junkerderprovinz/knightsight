@@ -302,41 +302,64 @@ func run(_ mcp: Mcp) throws {
     let rest = pointer
     let otherEvents = events().filter { $0.hasPrefix("Other") }.count
     say("      pointer rests at \(rest)")
-
-    let click = try mcp.tool("click", ["x": Double(inPicture(200, 150).x), "y": Double(inPicture(200, 150).y)])
-    check(!click.isError && click.text == "Clicked.", "click is done", click.text)
-    check((try? wait("the click", 5) { events().contains("Target click 200 150") ? true : nil }) ?? false,
-          "the click lands in the text area at the point aimed at", events().suffix(5).joined(separator: ", "))
+    func settled(after what: String) {
+        let back = try? wait("the front to come back", 3) { frontmost() == "Other" ? true : nil }
+        check(back ?? false, "after \(what) the covering window is in front again", frontmost())
+        check(hypot(pointer.x - rest.x, pointer.y - rest.y) < 1, "after \(what) the pointer is back", "it is at \(pointer), it rested at \(rest)")
+    }
+    func at(_ x: CGFloat, _ y: CGFloat) -> [String: Any] { ["x": Double(inPicture(x, y).x), "y": Double(inPicture(x, y).y)] }
 
     let hello = "Hello from KnightSight"
     let typed = try mcp.tool("type", ["text": hello])
-    check(!typed.isError, "type is done", typed.text)
+    check(typed.text == "Typed.", "type is done in the background", typed.text)
     let arrived = try? wait("the text", 5) { text(of: shared.pid) == hello ? true : nil }
     check(arrived ?? false, "the typed text arrives in the target", "the text area holds \(text(of: shared.pid) ?? "nothing")")
+    check(frontmost() == "Other" && pointer == rest, "typing leaves the front and the pointer alone", "\(frontmost()), \(pointer)")
     try save(try mcp.tool("look"), "3-typed.png")
-    _ = try mcp.tool("click", ["x": Double(inPicture(2, 111).x), "y": Double(inPicture(2, 111).y)])
+
+    let click = try mcp.tool("click", at(2, 111))
+    check(click.text == "Clicked, briefly in the foreground.", "click is done in the foreground for a moment", click.text)
+    check((try? wait("the click", 3) { events().contains("Target click 2 111") ? true : nil }) ?? false,
+          "the click lands at the point aimed at", events().suffix(5).joined(separator: ", "))
     let caret = try? wait("the caret", 3) { selection(of: shared.pid)?.location == 0 ? true : nil }
     check(caret ?? false, "a click at the start of the text puts the caret there",
           "the selection is \(selection(of: shared.pid).map { "\($0.location) + \($0.length)" } ?? "unknown")")
+    settled(after: "the click")
 
     let all = try mcp.tool("key", ["keys": "cmd+a"])
-    check(!all.isError, "cmd+a is done", all.text)
+    check(all.text == "Pressed, briefly in the foreground.", "cmd+a is done in the foreground for a moment", all.text)
     let selected = try? wait("the selection", 5) { text(of: shared.pid, kAXSelectedTextAttribute) == hello ? true : nil }
     check(selected ?? false, "cmd+a selects the whole text", "the selection is \(text(of: shared.pid, kAXSelectedTextAttribute) ?? "nothing")")
+    settled(after: "cmd+a")
     _ = try mcp.tool("type", ["text": "Replaced"])
     let replaced = try? wait("the replacement", 5) { text(of: shared.pid) == "Replaced" ? true : nil }
     check(replaced ?? false, "typing over the selection replaces it", "the text area holds \(text(of: shared.pid) ?? "nothing")")
     try save(try mcp.tool("look"), "4-replaced.png")
 
+    func lastScroll() -> Int? { events().compactMap { $0.hasPrefix("Target scrolled ") ? Int($0.dropFirst(16)) : nil }.last }
+    _ = try mcp.tool("type", ["text": String(repeating: "\nline", count: 30)])
+    let bottom = try? wait("the text to scroll down while typing", 5) { lastScroll().flatMap { $0 > 0 ? $0 : nil } }
+    let wheel = try mcp.tool("scroll", at(200, 150).merging(["amount": -3]) { $1 })
+    check(wheel.text == "Scrolled, briefly in the foreground.", "scroll is done in the foreground for a moment", wheel.text)
+    let up = try? wait("the text to scroll up", 3) { bottom.flatMap { b in lastScroll().flatMap { $0 < b ? true : nil } } }
+    check(up ?? false, "the wheel scrolls the text up", "it was at \(bottom.map(String.init) ?? "the top"), it is at \(lastScroll().map(String.init) ?? "the top")")
+    settled(after: "the scroll")
+    try save(try mcp.tool("look"), "5-scrolled.png")
+
     let outside = try mcp.tool("click", ["x": size.pixelsWide + 20, "y": 10])
     check(outside.isError && outside.text.contains("outside the share"), "a click outside the share is refused", outside.text)
     let windowsKey = try mcp.tool("key", ["keys": "win+r"])
     check(windowsKey.isError && windowsKey.text.contains("no Windows key"), "the Windows key is refused", windowsKey.text)
-
-    check(pointer == rest, "the pointer did not move", "it is at \(pointer), it rested at \(rest)")
-    check(frontmost() == "Other", "the covering window stayed in front", frontmost())
     check(events().filter { $0.hasPrefix("Other") }.count == otherEvents, "nothing reached the covering window",
           events().filter { $0.hasPrefix("Other") }.joined(separator: ", "))
+
+    let menu = try mcp.tool("click", at(100, 150).merging(["right": true]) { $1 })
+    check(menu.text.contains("A menu is open"), "a right click that opens a menu says so", menu.text)
+    usleep(500_000)
+    try save(try mcp.tool("look"), "6-menu.png")
+    check(frontmost() == "Target", "the shared window stays in front while its menu is open", frontmost())
+    keys(0x35, [])
+    settled(after: "the menu closes")
 
     keys(7, [.maskControl, .maskAlternate, .maskShift])
     let ended = try? wait("the hotkey to end the share", 5) { try mcp.tool("look").text.contains(nothingShared) ? true : nil }

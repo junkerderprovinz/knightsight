@@ -42,6 +42,10 @@ text.font = .systemFont(ofSize: 18)
 text.backgroundColor = .white
 text.textColor = .black
 scroll.documentView = text
+scroll.contentView.postsBoundsChangedNotifications = true
+NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { _ in
+    note("scrolled \(Int(scroll.contentView.bounds.minY))")
+}
 window.contentView!.addSubview(band)
 window.contentView!.addSubview(scroll)
 window.setFrameTopLeftPoint(CGPoint(x: corner.x, y: NSScreen.screens[0].frame.height - corner.y))
