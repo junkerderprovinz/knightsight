@@ -42,20 +42,19 @@ func check(_ ok: Bool, _ what: String, _ detail: @autoclosure () -> String = "")
     }
 }
 
-/// Posts a click and a key to the window's process directly, with the given event source.
-func probe(_ w: Win, at p: CGPoint, key: CGKeyCode, source: CGEventSource?) {
+/// Posts a click to the window's process directly, with or without naming the window in it.
+func probe(_ w: Win, at p: CGPoint, aim: Bool) {
     for type in [CGEventType.leftMouseDown, .leftMouseUp] {
-        let e = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!
+        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!
         e.setIntegerValueField(.mouseEventClickState, value: 1)
-        e.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(w.id))
-        e.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(w.id))
+        if aim {
+            e.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(w.id))
+            e.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(w.id))
+        }
         e.postToPid(w.pid)
         usleep(30_000)
     }
-    for down in [true, false] {
-        CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)!.postToPid(w.pid)
-    }
-    usleep(500_000)
+    usleep(300_000)
 }
 
 func wait<T>(_ what: String, _ seconds: Double = 15, _ probe: () throws -> T?) throws -> T {
@@ -346,12 +345,30 @@ func run(_ mcp: Mcp) throws {
     check(events().filter { $0.hasPrefix("Other") }.count == otherEvents, "nothing reached the covering window",
                events().filter { $0.hasPrefix("Other") }.joined(separator: ", "))
 
-    probe(shared, at: CGPoint(x: shared.bounds.minX + 10, y: shared.bounds.minY + titleBar + 110), key: 0x00, source: nil)
-    probe(shared, at: CGPoint(x: shared.bounds.minX + 20, y: shared.bounds.minY + titleBar + 120), key: 0x0B,
-          source: CGEventSource(stateID: .privateState))
-    probe(shared, at: CGPoint(x: shared.bounds.minX + 30, y: shared.bounds.minY + titleBar + 130), key: 0x08,
-          source: CGEventSource(stateID: .hidSystemState))
-    say("      after the probes (a: no source, b: private, c: hid): \(events().joined(separator: ", "))")
+    func spot(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: shared.bounds.minX + x, y: shared.bounds.minY + titleBar + y) }
+    probe(shared, at: spot(10, 110), aim: true)
+    probe(shared, at: spot(20, 120), aim: false)
+    mouse(.mouseMoved, spot(30, 130))
+    usleep(200_000)
+    probe(shared, at: spot(30, 130), aim: true)
+    mouse(.mouseMoved, spot(40, 140))
+    usleep(200_000)
+    probe(shared, at: spot(40, 140), aim: false)
+    press(band)
+    say("      target in front: \(frontmost() == "Target")")
+    probe(shared, at: spot(50, 150), aim: true)
+    probe(shared, at: spot(60, 160), aim: false)
+    mouse(.mouseMoved, spot(70, 170))
+    usleep(200_000)
+    probe(shared, at: spot(70, 170), aim: true)
+    say("      probes: 10/20 behind, pointer away, aimed or not; 30/40 behind, pointer there; 50/60 in front, pointer away; 70 in front, pointer there")
+    say("      clicks seen: \(events().filter { $0.contains("click") }.joined(separator: ", "))")
+    _ = try mcp.tool("key", ["keys": "cmd+a"])
+    let selectedInFront = try? wait("the selection", 3) { (text(of: shared.pid, kAXSelectedTextAttribute) ?? "").isEmpty ? nil : true }
+    say("      with the target in front cmd+a selects: \(selectedInFront ?? false)")
+    _ = try mcp.tool("click", ["x": Double(inPicture(80, 180).x), "y": Double(inPicture(80, 180).y)])
+    usleep(500_000)
+    say("      with the target in front the click at 80 180 arrives: \(events().contains("Target click 80 180"))")
 
     keys(7, [.maskControl, .maskAlternate, .maskShift])
     let ended = try? wait("the hotkey to end the share", 5) { try mcp.tool("look").text.contains(nothingShared) ? true : nil }
