@@ -1,8 +1,9 @@
 name: Release
 
-# Fires on the version tag, builds KnightSight.exe and publishes the hand-written
-# notes as the GitHub release, with the EXE, the MCP server and their checksums.
-# A failed build leaves no release; re-running the job finishes it.
+# Fires on the version tag, builds KnightSight for Windows, macOS and Linux and
+# publishes the hand-written notes as the GitHub release, with every build, the MCP
+# server and their checksums. A failed build leaves no release; re-running the
+# failed jobs finishes it.
 on:
   push:
     tags:
@@ -12,16 +13,12 @@ permissions:
   contents: read
 
 jobs:
-  release:
-    runs-on: windows-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
+  notes:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Check that the notes exist
-        shell: bash
         run: |
           set -eu
           notes=".github/release-notes/${GITHUB_REF_NAME}.md"
@@ -31,23 +28,59 @@ jobs:
             exit 1
           fi
 
+  windows:
+    needs: notes
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - name: Build KnightSight.exe
         shell: powershell
         run: .\build.ps1
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: knightsight-windows
+          path: dist/KnightSight.exe
+          if-no-files-found: error
+
+  macos:
+    needs: notes
+    uses: ./.github/workflows/macos.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  linux:
+    needs: notes
+    uses: ./.github/workflows/linux.yml
+
+  publish:
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - name: Check the MCP server
         run: node --check mcp/knightsight-mcp.mjs
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
       - name: Checksums
-        shell: bash
         run: |
           set -eu
-          cp mcp/knightsight-mcp.mjs dist/
-          (cd dist && sha256sum KnightSight.exe knightsight-mcp.mjs > checksums.txt)
+          mkdir -p dist
+          cp artifacts/* mcp/knightsight-mcp.mjs dist/
+          (cd dist && sha256sum * > checksums.txt)
           cat dist/checksums.txt
 
       - name: Publish
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/publish-release.sh dist/KnightSight.exe dist/knightsight-mcp.mjs dist/checksums.txt
+        run: bash .github/scripts/publish-release.sh dist/*
