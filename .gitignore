@@ -1,3 +1,9 @@
 dist/
 obj/
 .build/
+__pycache__/
+# What flatpak-builder and linux/package.sh leave behind in the clone.
+/linux/flatpak/.state/
+/linux/flatpak/.repo/
+*.flatpak
+knightsight-linux-*.zip

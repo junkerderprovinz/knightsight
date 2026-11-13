@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=KnightSight
+GenericName=Window Sharing for Coding Assistants
+Comment=Show your coding assistant one window or one region of the screen, and nothing else
+Exec=knightsight
+Icon=io.github.junkerderprovinz.knightsight
+Terminal=false
+Categories=Utility;Development;
+Keywords=share;screen;window;region;assistant;mcp;screenshot;
+StartupNotify=true
+StartupWMClass=io.github.junkerderprovinz.knightsight
+SingleMainWindow=true

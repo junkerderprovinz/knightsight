@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.junkerderprovinz.knightsight</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+
+  <name>KnightSight</name>
+  <summary>Show your coding assistant one window, only that one</summary>
+  <developer id="io.github.junkerderprovinz">
+    <name>junkerderprovinz</name>
+  </developer>
+
+  <description>
+    <p>
+      KnightSight shares one window or one region of the screen with a coding
+      assistant that speaks MCP. The assistant can look at it, click in it and
+      type into it. It sees nothing outside the share, and nothing at all until
+      it asks.
+    </p>
+    <p>What it does:</p>
+    <ul>
+      <li>Pick a window or drag a rectangle, then start sharing when you are ready</li>
+      <li>Refuses every click and key outside the share, and the Super key everywhere</li>
+      <li>Shows what is going on, such as "Typing" or "Taking a screenshot"</li>
+      <li>Ctrl+Alt+Shift+X or closing the window ends the share at once</li>
+      <li>Reachable from another machine through one SSH tunnel</li>
+    </ul>
+    <p>
+      On Wayland the desktop asks which window or screen to share, and the
+      desktop moves the real pointer for each click. On X11 a click brings the
+      window to the front for a moment, then your window and pointer go back to
+      where they were.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.junkerderprovinz.knightsight.desktop</launchable>
+  <provides>
+    <binary>knightsight</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/junkerderprovinz/knightsight</url>
+  <url type="bugtracker">https://github.com/junkerderprovinz/knightsight/issues</url>
+  <url type="vcs-browser">https://github.com/junkerderprovinz/knightsight</url>
+  <url type="contribute">https://github.com/junkerderprovinz/knightsight/issues</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>A chosen window in a grey frame, not shared yet</caption>
+      <image>https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/pick.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A shared window in a yellow frame</caption>
+      <image>https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/share.png</image>
+    </screenshot>
+  </screenshots>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#fcc419</color>
+    <color type="primary" scheme_preference="dark">#262626</color>
+  </branding>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="1.0.0" date="2026-11-13">
+      <description>
+        <p>The first release of KnightSight: one window or one screen region, shared with a coding assistant and nothing else.</p>
+      </description>
+      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.0.0</url>
+    </release>
+  </releases>
+</component>

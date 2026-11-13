@@ -1,0 +1,34 @@
+# Builds KnightSight as a Flatpak from this checkout:
+#
+#     flatpak-builder --user --install --force-clean --state-dir=linux/flatpak/.state \
+#       linux/flatpak/.build linux/flatpak/io.github.junkerderprovinz.knightsight.yml
+#
+# Python, GTK, GStreamer and its PipeWire source all come with the GNOME runtime, so the
+# build only copies the program in.
+id: io.github.junkerderprovinz.knightsight
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+command: knightsight
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # The MCP server reaches the panel on the loopback port, and a sandbox without the
+  # host's network has a loopback of its own.
+  - --share=network
+modules:
+  - name: knightsight
+    buildsystem: simple
+    build-commands:
+      - sh linux/build.sh $FLATPAK_DEST
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - .github
+          - linux/flatpak/.state
+          - linux/flatpak/.build
+          - linux/flatpak/.repo
