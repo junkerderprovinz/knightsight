@@ -761,25 +761,28 @@ namespace KnightSight
         }
     }
 
-    // A brass spyglass across a steel frame: someone looking at what is shared. Drawn on a
-    // 256 grid with the light from the top left, without smoothing at four times the size and
-    // then scaled down, so the facets meet without hairlines and the clip's edges come out soft.
-    public static class Logo
+    // A brass spyglass across a split steel ring: someone looking at what is shared. The shapes
+    // come from .github/assets/knightsight.svg through gen-logo-shapes.mjs. They are filled
+    // without smoothing at four times the size and then scaled down, so neighbouring shapes meet
+    // without hairlines and the edges still come out soft.
+    public static partial class Logo
     {
-        const float Grid = 256;
         const int Oversampling = 4;
-
-        // From eyepiece to hood: start, end and half width of each part, rings and tubes taking turns.
-        static readonly float[][] Parts =
-        {
-            new float[] { 0, 12, 15 }, new float[] { 12, 92, 13 }, new float[] { 92, 104, 22 }, new float[] { 104, 170, 19 },
-            new float[] { 170, 182, 28 }, new float[] { 182, 250, 25 }, new float[] { 250, 264, 30 },
-        };
-        static readonly Color SteelLit = Color.FromArgb(184, 184, 184), SteelShade = Color.FromArgb(131, 131, 136),
-            SteelDark = Color.FromArgb(102, 102, 107);
-        static readonly Color BrassLit = Color.FromArgb(253, 216, 142), Brass = Color.FromArgb(233, 186, 87),
-            BrassShade = Color.FromArgb(205, 147, 55), BrassDark = Color.FromArgb(145, 102, 49);
         static readonly Dictionary<int, Bitmap> drawn = new Dictionary<int, Bitmap>();
+
+        sealed class Shape
+        {
+            public readonly Color Fill;
+            public readonly string Path;
+            public Shape(int rgb, string path) { Fill = Color.FromArgb(255, Color.FromArgb(rgb)); Path = path; }
+        }
+
+        sealed class Drawing
+        {
+            public readonly float Width, Height;
+            public readonly Shape[] Shapes;
+            public Drawing(float width, float height, Shape[] shapes) { Width = width; Height = height; Shapes = shapes; }
+        }
 
         public static Bitmap Render(int size)
         {
@@ -787,13 +790,13 @@ namespace KnightSight
             {
                 using (var g = Graphics.FromImage(large))
                 {
-                    g.ScaleTransform(large.Width / Grid, large.Height / Grid);
-                    using (var tube = TubeArea())
-                    using (var clear = new Region(tube))
-                        g.ExcludeClip(clear);
-                    DrawFrame(g);
-                    g.ResetClip();
-                    DrawTube(g);
+                    float scale = large.Width / Math.Max(Bare.Width, Bare.Height);
+                    g.TranslateTransform((large.Width - Bare.Width * scale) / 2, (large.Height - Bare.Height * scale) / 2);
+                    g.ScaleTransform(scale, scale);
+                    foreach (var shape in Bare.Shapes)
+                        using (var path = Outline(shape.Path))
+                        using (var brush = new SolidBrush(shape.Fill))
+                            g.FillPath(brush, path);
                 }
                 var bmp = new Bitmap(size, size);
                 using (var g = Graphics.FromImage(bmp))
@@ -814,63 +817,47 @@ namespace KnightSight
             g.DrawImage(bmp, x, y, size, size);
         }
 
-        static Matrix TubeAxis()
+        // The steps the generator writes: M, L, C and Z, each followed by its absolute points.
+        static GraphicsPath Outline(string steps)
         {
-            var m = new Matrix();
-            m.Translate(36, 220);
-            m.Rotate(-45);
-            return m;
-        }
-
-        static GraphicsPath TubeArea()
-        {
-            // Straight edges for the narrow and the wide half, so the rings leave no slivers of frame.
             var path = new GraphicsPath(FillMode.Winding);
-            path.AddRectangle(RectangleF.FromLTRB(-7, -20, 111, 20));
-            path.AddRectangle(RectangleF.FromLTRB(97, -35, 271, 35));
-            using (var axis = TubeAxis()) path.Transform(axis);
+            var t = steps.Split(' ');
+            var at = PointF.Empty;
+            for (int i = 0; i < t.Length; )
+            {
+                switch (t[i++])
+                {
+                    case "M":
+                        path.StartFigure();
+                        at = Next(t, ref i);
+                        break;
+                    case "L":
+                    {
+                        var p = Next(t, ref i);
+                        path.AddLine(at, p);
+                        at = p;
+                        break;
+                    }
+                    case "C":
+                    {
+                        PointF c1 = Next(t, ref i), c2 = Next(t, ref i), p = Next(t, ref i);
+                        path.AddBezier(at, c1, c2, p);
+                        at = p;
+                        break;
+                    }
+                    case "Z":
+                        path.CloseFigure();
+                        break;
+                }
+            }
             return path;
         }
 
-        static void DrawFrame(Graphics g)
+        static PointF Next(string[] t, ref int i)
         {
-            const float outer0 = 44, outer1 = 212, step0 = 58, step1 = 198, inner0 = 72, inner1 = 184;
-            Band(g, SteelLit, outer0, outer0, outer1, outer0, step1, step0, step0, step0);
-            Band(g, SteelLit, outer0, outer0, step0, step0, step0, step1, outer0, outer1);
-            Band(g, SteelDark, outer1, outer0, outer1, outer1, step1, step1, step1, step0);
-            Band(g, SteelDark, outer0, outer1, step0, step1, step1, step1, outer1, outer1);
-            Band(g, SteelShade, step0, step0, step1, step0, inner1, inner0, inner0, inner0);
-            Band(g, SteelShade, step0, step0, inner0, inner0, inner0, inner1, step0, step1);
-            Band(g, SteelLit, step1, step0, step1, step1, inner1, inner1, inner1, inner0);
-            Band(g, SteelLit, step0, step1, inner0, inner1, inner1, inner1, step1, step1);
-        }
-
-        static void Band(Graphics g, Color color, float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3)
-        {
-            using (var brush = new SolidBrush(color))
-                g.FillPolygon(brush, new[] { new PointF(x0, y0), new PointF(x1, y1), new PointF(x2, y2), new PointF(x3, y3) });
-        }
-
-        static void DrawTube(Graphics g)
-        {
-            var state = g.Save();
-            using (var axis = TubeAxis()) g.MultiplyTransform(axis);
-            for (int i = 0; i < Parts.Length; i++)
-            {
-                var p = Parts[i];
-                bool ring = i % 2 == 0;
-                Stripe(g, ring ? BrassShade : Brass, p, -1, 1);
-                Stripe(g, ring ? Brass : BrassLit, p, -1, ring ? -0.3f : -0.42f);
-                Stripe(g, ring ? BrassDark : BrassShade, p, ring ? 0.45f : 0.38f, 1);
-            }
-            g.Restore(state);
-        }
-
-        // A band along one part, its edges given as fractions of the half width.
-        static void Stripe(Graphics g, Color color, float[] part, float from, float to)
-        {
-            using (var brush = new SolidBrush(color))
-                g.FillRectangle(brush, RectangleF.FromLTRB(part[0], from * part[2], part[1], to * part[2]));
+            var p = new PointF(float.Parse(t[i], CultureInfo.InvariantCulture), float.Parse(t[i + 1], CultureInfo.InvariantCulture));
+            i += 2;
+            return p;
         }
 
         public static Icon MakeIcon(int size)

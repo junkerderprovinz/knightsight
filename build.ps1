@@ -4,7 +4,7 @@
 param([string]$Out = (Join-Path $PSScriptRoot 'dist\KnightSight.exe'))
 $ErrorActionPreference = 'Stop'
 
-$source = Join-Path $PSScriptRoot 'src\KnightSight.cs'
+$sources = 'KnightSight.cs', 'LogoShapes.cs' | ForEach-Object { Join-Path $PSScriptRoot "src\$_" }
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $work = Join-Path $PSScriptRoot 'obj'
 New-Item -ItemType Directory -Force $work, (Split-Path -Parent ([IO.Path]::GetFullPath($Out))) | Out-Null
@@ -23,7 +23,8 @@ $refs = @(
     [System.Drawing.Bitmap].Assembly.Location
     [System.Web.Script.Serialization.JavaScriptSerializer].Assembly.Location
 )
-Add-Type -TypeDefinition (Get-Content -Raw -Encoding UTF8 $source) -ReferencedAssemblies $refs
+# One piece of text for Add-Type, which works since LogoShapes.cs brings no usings of its own.
+Add-Type -TypeDefinition ((Get-Content -Raw -Encoding UTF8 $sources) -join "`n") -ReferencedAssemblies $refs
 $sizes = 16, 24, 32, 48, 64, 256
 $images = foreach ($size in $sizes) {
     $ms = New-Object System.IO.MemoryStream
@@ -46,6 +47,6 @@ $w.Close()
 
 # AnyCPU without a preference for 32 bit, so one file runs on x64 and on ARM64 alike.
 $resources = $fonts | ForEach-Object { "/resource:$_,$(Split-Path $_ -Leaf)" }
-& $csc /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 "/out:$Out" "/win32icon:$ico" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @resources $source
+& $csc /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 "/out:$Out" "/win32icon:$ico" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @resources $sources
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 "built $Out"

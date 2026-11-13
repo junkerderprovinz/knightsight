@@ -1,6 +1,6 @@
-# Renders the logo from the drawing code in src/KnightSight.cs, so the README and the
-# program show the same picture: logo.png cut to its ink for the banners, and icon.png
-# on white.
+# Renders the logo with the program's own drawing code, which fills the shapes taken from
+# knightsight.svg, so the README and the program show the same picture: logo.png cut to its
+# ink for the banners, and icon.png on white.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Web.Extensions
 $refs = @(
@@ -8,8 +8,8 @@ $refs = @(
     [System.Drawing.Bitmap].Assembly.Location
     [System.Web.Script.Serialization.JavaScriptSerializer].Assembly.Location
 )
-$source = Join-Path $PSScriptRoot '..\..\src\KnightSight.cs'
-Add-Type -TypeDefinition (Get-Content -Raw -Encoding UTF8 $source) -ReferencedAssemblies $refs
+$sources = 'KnightSight.cs', 'LogoShapes.cs' | ForEach-Object { Join-Path $PSScriptRoot "..\..\src\$_" }
+Add-Type -TypeDefinition ((Get-Content -Raw -Encoding UTF8 $sources) -join "`n") -ReferencedAssemblies $refs
 
 $full = [KnightSight.Logo]::Render(1024)
 $left = $full.Width; $top = $full.Height; $right = -1; $bottom = -1
