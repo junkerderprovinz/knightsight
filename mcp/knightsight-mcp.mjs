@@ -88,7 +88,7 @@ const tools = [
   },
 ];
 
-const NOT_RUNNING = 'KnightSight is not running. Start KnightSight.exe, choose a window or a region and start sharing.';
+const NOT_RUNNING = 'KnightSight is not running. Start KnightSight, choose a window or a region and start sharing.';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // KNIGHTSIGHT_SSH names the machine the panel runs on, the way ssh takes it: a host,
@@ -189,18 +189,22 @@ async function viaDesk(msg, d) {
   }
 }
 
+// The pipe exists only on Windows. On macOS and Linux the panel listens on the loopback port.
+const local = () => (process.platform === 'win32' ? net.connect(PIPE) : net.connect(PORT, '127.0.0.1'));
+const absent = (err) => err.code === 'ENOENT' || err.code === 'ECONNREFUSED';
+
 // Between two clients the panel takes a moment to open the pipe again.
 async function relay(msg) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return (await exchange(net.connect(PIPE), msg)) ?? { ok: false, error: NOT_RUNNING };
+      return (await exchange(local(), msg)) ?? { ok: false, error: NOT_RUNNING };
     } catch (err) {
-      if (attempt < 20 && ['ENOENT', 'EBUSY'].includes(err.code)) {
-        if (err.code === 'ENOENT' && desk()) break;
+      if (attempt < 20 && (absent(err) || err.code === 'EBUSY')) {
+        if (absent(err) && desk()) break;
         await sleep(100);
         continue;
       }
-      if (err.code !== 'ENOENT') throw err;
+      if (!absent(err)) throw err;
       break;
     }
   }
