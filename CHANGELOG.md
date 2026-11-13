@@ -4,6 +4,20 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## v1.1.0 (unreleased)
+
+KnightSight on macOS and Linux, with the same MCP server for all three systems.
+
+## ✨ Added
+
+- **KnightSight for macOS 13 and newer**, one app for Apple silicon and Intel.
+- **KnightSight for Linux on x64 and ARM**, as a zip and as a Flatpak, on X11 and Wayland.
+- **Download buttons for macOS, Linux and Flatpak.**
+
+## ⚡ Improved
+
+- **The MCP server reaches the panel on its loopback port off Windows.**
+
 ## v1.0.0 (2026-11-13)
 
 The first release of KnightSight: one window or one screen region, shared with a coding assistant and nothing else.
