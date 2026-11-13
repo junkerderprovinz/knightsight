@@ -1,0 +1,53 @@
+name: Release
+
+# Fires on the version tag, builds KnightSight.exe and publishes the hand-written
+# notes as the GitHub release, with the EXE, the MCP server and their checksums.
+# A failed build leaves no release; re-running the job finishes it.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check that the notes exist
+        shell: bash
+        run: |
+          set -eu
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ ! -s "$notes" ]; then
+            echo "no release notes at $notes" >&2
+            echo "A release without notes is a tag, and a tag is not a release." >&2
+            exit 1
+          fi
+
+      - name: Build KnightSight.exe
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Check the MCP server
+        run: node --check mcp/knightsight-mcp.mjs
+
+      - name: Checksums
+        shell: bash
+        run: |
+          set -eu
+          cp mcp/knightsight-mcp.mjs dist/
+          (cd dist && sha256sum KnightSight.exe knightsight-mcp.mjs > checksums.txt)
+          cat dist/checksums.txt
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/publish-release.sh dist/KnightSight.exe dist/knightsight-mcp.mjs dist/checksums.txt
