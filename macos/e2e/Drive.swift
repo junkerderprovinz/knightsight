@@ -41,7 +41,7 @@ func wait<T>(_ what: String, _ seconds: Double = 15, _ probe: () throws -> T?) t
 }
 
 struct Win {
-    let id: CGWindowID, pid: pid_t, layer: Int, bounds: CGRect, name: String, owner: String, alpha: Double
+    let id: CGWindowID, pid: pid_t, layer: Int, bounds: CGRect, name: String, owner: String
 }
 
 /// Front to back.
@@ -53,8 +53,7 @@ func onScreen() -> [Win] {
               let bounds = CGRect(dictionaryRepresentation: box as CFDictionary)
         else { return nil }
         return Win(id: id, pid: pid, layer: layer, bounds: bounds,
-                   name: e[kCGWindowName as String] as? String ?? "", owner: e[kCGWindowOwnerName as String] as? String ?? "",
-                   alpha: e[kCGWindowAlpha as String] as? Double ?? 1)
+                   name: e[kCGWindowName as String] as? String ?? "", owner: e[kCGWindowOwnerName as String] as? String ?? "")
     }
 }
 
@@ -68,16 +67,12 @@ func frontmost() -> String {
 
 var pointer: CGPoint { CGEvent(source: nil)!.location }
 
-// Events from a source with the hardware's state ID count toward that state, which the
-// panel reads to notice the click that picks a window.
+// The panel watches the hardware's button state while picking a window, and events from a
+// source with the hardware's state ID count toward it.
 let hardware = CGEventSource(stateID: .hidSystemState)
 
 func mouse(_ type: CGEventType, _ p: CGPoint) {
     CGEvent(mouseEventSource: hardware, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!.post(tap: .cghidEventTap)
-}
-
-func buttonStates() -> String {
-    "hid \(CGEventSource.buttonState(.hidSystemState, button: .left)), session \(CGEventSource.buttonState(.combinedSessionState, button: .left)), pressedMouseButtons \(NSEvent.pressedMouseButtons), mouseLocation \(NSEvent.mouseLocation)"
 }
 
 /// A slow click, so the panel's poll of the mouse button sees it go down and up.
@@ -86,7 +81,6 @@ func press(_ p: CGPoint) {
     usleep(200_000)
     mouse(.leftMouseDown, p)
     usleep(150_000)
-    say("      button held at \(p): \(buttonStates())")
     mouse(.leftMouseUp, p)
     usleep(400_000)
 }
@@ -237,14 +231,9 @@ func run(_ mcp: Mcp) throws {
 
     let band = CGPoint(x: shared.bounds.minX + 200, y: shared.bounds.minY + titleBar + 50)
     var chosen = false
-    for attempt in 1...3 where !chosen {
+    for _ in 1...3 where !chosen {
         press(onPanel(110, 156))
-        if attempt > 1 { press(onPanel(110, 156)) }
         press(band)
-        snap("choose-\(attempt).png")
-        for w in onScreen() where w.bounds.contains(band) {
-            say("      under the click: \(w.owner) \"\(w.name)\" layer \(w.layer) alpha \(w.alpha) \(w.bounds)")
-        }
         chosen = (try? wait("the frame", 5) { edges().count == 4 ? true : nil }) ?? false
     }
     try expect(chosen, "choosing the target through the panel draws the frame")
@@ -261,6 +250,7 @@ func run(_ mcp: Mcp) throws {
     guard let look = first else { throw Failure("sharing did not start") }
     try save(look, "1-shared.png")
     try expect(!look.isError, "look works once sharing is on", look.text)
+    try expect(!look.text.contains("fully covered"), "a window in plain view is not called covered", look.text)
 
     shared = try window("Target")
     let size = NSBitmapImageRep(data: look.image!)!
@@ -288,6 +278,7 @@ func run(_ mcp: Mcp) throws {
 
     let covered = try mcp.tool("look")
     try save(covered, "2-covered.png")
+    try expect(!covered.text.contains("fully covered"), "a partly covered window is not called fully covered", covered.text)
     for (x, y, ok, what) in [(300.0, 75.0, \Rgb.red, "band"), (300.0, 250.0, \Rgb.white, "text area")] {
         let seen = pixel(covered.image!, inPicture(x, y))
         try expect(seen[keyPath: ok], "the covered \(what) still shows the target, not the window on top", "\(seen)")
