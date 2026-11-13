@@ -196,6 +196,11 @@ func save(_ reply: ToolReply, _ name: String) throws {
     say("      saved \(name)")
 }
 
+/// The runner's whole screen, to see what went wrong.
+func snap(_ name: String) {
+    try? spawn("/usr/sbin/screencapture", ["-x", out.appendingPathComponent(name).path]).waitUntilExit()
+}
+
 func run(_ mcp: Mcp) throws {
     let screen = CGDisplayBounds(CGMainDisplayID())
     say("macOS \(ProcessInfo.processInfo.operatingSystemVersionString), main display \(Int(screen.width)) x \(Int(screen.height))")
@@ -222,9 +227,11 @@ func run(_ mcp: Mcp) throws {
 
     let band = CGPoint(x: shared.bounds.minX + 200, y: shared.bounds.minY + titleBar + 50)
     var chosen = false
-    for _ in 1...3 where !chosen {
+    for attempt in 1...3 where !chosen {
         press(onPanel(110, 156))
+        if attempt > 1 { press(onPanel(110, 156)) }
         press(band)
+        snap("choose-\(attempt).png")
         chosen = (try? wait("the frame", 5) { edges().count == 4 ? true : nil }) ?? false
     }
     try expect(chosen, "choosing the target through the panel draws the frame")
@@ -321,6 +328,7 @@ do {
 } catch let failure as Failure {
     say("fail  \(failure.message)")
     failed = true
+    snap("failed.png")
 }
 say("target events: \(events().joined(separator: ", "))")
 mcp.stop()
