@@ -1,0 +1,40 @@
+name: macOS
+
+# Tests the protocol handling and builds KnightSight.app for Apple silicon and Intel. The
+# zipped app stays as an artifact, so release.yml can call this and attach it.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "macos/**"
+      - ".github/workflows/macos.yml"
+  workflow_call:
+    inputs:
+      version:
+        description: Version written into the app, such as 1.1.0. Empty keeps the one in Info.plist.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Test
+        run: swift test --package-path macos
+
+      - name: Build KnightSight.app
+        env:
+          KNIGHTSIGHT_VERSION: ${{ inputs.version }}
+        run: macos/build.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: knightsight-macos-universal
+          path: macos/dist/knightsight-macos-universal.zip
+          if-no-files-found: error
