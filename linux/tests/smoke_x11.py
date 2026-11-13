@@ -7,6 +7,7 @@ Needs DISPLAY, a session bus, openbox, xdotool, Tk and node: tests/smoke-x11.sh 
 import base64
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -143,9 +144,17 @@ class SmokeX11(unittest.TestCase):
         spawn(sys.executable, os.path.join(HERE, "target.py"), cls.log.name, "Target", "#ff0000", "+600+100")
         window("Target")
         env = dict(os.environ, LANGUAGE="en", GDK_BACKEND="x11", GSK_RENDERER="cairo", NO_AT_BRIDGE="1",
-                   PYTHONPATH=LINUX)
+                   PYTHONPATH=LINUX, PYTHONFAULTHANDLER="1")
         cls.panel = spawn(sys.executable, "-m", "knightsight", env=env)
-        wait_for(listening, "the port")
+        try:
+            wait_for(lambda: listening() or cls.panel.poll() is not None, "the port", 60)
+        except AssertionError:
+            # PYTHONFAULTHANDLER makes the stuck panel print where each thread is.
+            cls.panel.send_signal(signal.SIGABRT)
+            cls.panel.wait()
+            raise
+        if cls.panel.poll() is not None:
+            raise AssertionError(f"the panel exited with {cls.panel.returncode}")
         cls.panel_id = window("KnightSight")
         cls.mcp = Mcp()
 
