@@ -18,7 +18,7 @@ final class Foreground {
 
     /// Runs act with the window in front and returns what the reply should add. With a point,
     /// the window has to be the one a click there reaches.
-    func run(_ target: WindowInfo, at point: CGPoint?, _ act: () -> Void) throws -> String {
+    func run(_ target: WindowInfo, at point: CGPoint?, mayOpenMenu: Bool = false, _ act: () -> Void) throws -> String {
         lock.lock()
         defer { lock.unlock() }
         try waitForQuiet()
@@ -28,12 +28,15 @@ final class Foreground {
         session.busy()
         act()
         usleep(150_000)
-        print("after 150 ms:", Windows.visible().filter { $0.pid == target.pid }.map { "\($0.layer) \($0.bounds)" }); fflush(stdout)
-        usleep(450_000)
-        print("after 600 ms:", Windows.visible().filter { $0.pid == target.pid }.map { "\($0.layer) \($0.bounds)" }); fflush(stdout)
+        // A menu takes a few hundred milliseconds to show up, and it would close as soon as
+        // another app takes the front.
+        var menu = Foreground.menuOpen(in: target.pid)
+        for _ in 0..<(mayOpenMenu ? 10 : 0) where !menu {
+            usleep(50_000)
+            menu = Foreground.menuOpen(in: target.pid)
+        }
         CGWarpMouseCursorPosition(pointer)
-        // A menu that just opened would close as soon as another app takes the front.
-        if Foreground.menuOpen(in: target.pid) {
+        if menu {
             session.lent = (front: front, holder: target.pid)
             return " A menu is open, so the window stays in front until it closes."
         }

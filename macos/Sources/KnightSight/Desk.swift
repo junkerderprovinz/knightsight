@@ -126,7 +126,7 @@ final class MacDesk: Desk {
         let chosen = try current()
         let target = try self.target(at: point, in: chosen)
         if chosen.window == nil { session.focus = target }
-        let note = try foreground.run(target, at: point) { Input.click(at: point, right: right, twice: double) }
+        let note = try foreground.run(target, at: point, mayOpenMenu: true) { Input.click(at: point, right: right, twice: double) }
         return "Clicked, briefly in the foreground." + note
     }
 
