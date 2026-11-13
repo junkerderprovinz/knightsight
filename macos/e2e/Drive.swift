@@ -42,21 +42,6 @@ func check(_ ok: Bool, _ what: String, _ detail: @autoclosure () -> String = "")
     }
 }
 
-/// Posts a click to the window's process directly, with or without naming the window in it.
-func probe(_ w: Win, at p: CGPoint, aim: Bool) {
-    for type in [CGEventType.leftMouseDown, .leftMouseUp] {
-        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!
-        e.setIntegerValueField(.mouseEventClickState, value: 1)
-        if aim {
-            e.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(w.id))
-            e.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(w.id))
-        }
-        e.postToPid(w.pid)
-        usleep(30_000)
-    }
-    usleep(300_000)
-}
-
 func wait<T>(_ what: String, _ seconds: Double = 15, _ probe: () throws -> T?) throws -> T {
     let end = Date().addingTimeInterval(seconds)
     repeat {
@@ -93,8 +78,8 @@ func frontmost() -> String {
 
 var pointer: CGPoint { CGEvent(source: nil)!.location }
 
-// The panel watches the hardware's button state while picking a window, and events from a
-// source with the hardware's state ID count toward it.
+// Clicks as the hardware sends them, since the panel watches the hardware's button state
+// while the person picks a window.
 let hardware = CGEventSource(stateID: .hidSystemState)
 
 func mouse(_ type: CGEventType, _ p: CGPoint) {
@@ -148,7 +133,6 @@ struct Rgb: CustomStringConvertible {
     let r: Int, g: Int, b: Int
     var description: String { "(\(r), \(g), \(b))" }
     var red: Bool { r > 200 && g < 80 && b < 80 }
-    var blue: Bool { b > 200 && r < 80 && g < 80 }
     var white: Bool { r > 235 && g > 235 && b > 235 }
 }
 
@@ -301,8 +285,7 @@ func run(_ mcp: Mcp) throws {
 
     try spawn(targetPath, ["Other", "0000ff", "\(Int(shared.bounds.minX) + 150)", "\(Int(shared.bounds.minY) + 80)", eventsPath])
     let other = try window("Other")
-    let otherBand = CGPoint(x: other.bounds.midX, y: other.bounds.minY + titleBar + 50)
-    press(otherBand)
+    press(CGPoint(x: other.bounds.midX, y: other.bounds.minY + titleBar + 50))
     try expect((try? wait("Other in front", 5) { frontmost() == "Other" ? true : nil }) ?? false, "the covering window comes to the front", frontmost())
     let order = onScreen().map(\.id)
     try expect(edges().allSatisfy { order.firstIndex(of: $0.id)! > order.firstIndex(of: other.id)! },
@@ -323,7 +306,7 @@ func run(_ mcp: Mcp) throws {
     let click = try mcp.tool("click", ["x": Double(inPicture(200, 150).x), "y": Double(inPicture(200, 150).y)])
     check(!click.isError && click.text == "Clicked.", "click is done", click.text)
     check((try? wait("the click", 5) { events().contains("Target click 200 150") ? true : nil }) ?? false,
-               "the click lands in the text area at the point aimed at", events().suffix(5).joined(separator: ", "))
+          "the click lands in the text area at the point aimed at", events().suffix(5).joined(separator: ", "))
 
     let hello = "Hello from KnightSight"
     let typed = try mcp.tool("type", ["text": hello])
@@ -331,10 +314,10 @@ func run(_ mcp: Mcp) throws {
     let arrived = try? wait("the text", 5) { text(of: shared.pid) == hello ? true : nil }
     check(arrived ?? false, "the typed text arrives in the target", "the text area holds \(text(of: shared.pid) ?? "nothing")")
     try save(try mcp.tool("look"), "3-typed.png")
-    say("      selection before the click \(String(describing: selection(of: shared.pid)))")
     _ = try mcp.tool("click", ["x": Double(inPicture(2, 111).x), "y": Double(inPicture(2, 111).y)])
     let caret = try? wait("the caret", 3) { selection(of: shared.pid)?.location == 0 ? true : nil }
-    check(caret ?? false, "a click at the start of the text puts the caret there", "the selection is \(String(describing: selection(of: shared.pid)))")
+    check(caret ?? false, "a click at the start of the text puts the caret there",
+          "the selection is \(selection(of: shared.pid).map { "\($0.location) + \($0.length)" } ?? "unknown")")
 
     let all = try mcp.tool("key", ["keys": "cmd+a"])
     check(!all.isError, "cmd+a is done", all.text)
@@ -353,35 +336,7 @@ func run(_ mcp: Mcp) throws {
     check(pointer == rest, "the pointer did not move", "it is at \(pointer), it rested at \(rest)")
     check(frontmost() == "Other", "the covering window stayed in front", frontmost())
     check(events().filter { $0.hasPrefix("Other") }.count == otherEvents, "nothing reached the covering window",
-               events().filter { $0.hasPrefix("Other") }.joined(separator: ", "))
-
-    func spot(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: shared.bounds.minX + x, y: shared.bounds.minY + titleBar + y) }
-    probe(shared, at: spot(10, 110), aim: true)
-    probe(shared, at: spot(20, 120), aim: false)
-    mouse(.mouseMoved, spot(30, 130))
-    usleep(200_000)
-    probe(shared, at: spot(30, 130), aim: true)
-    mouse(.mouseMoved, spot(40, 140))
-    usleep(200_000)
-    probe(shared, at: spot(40, 140), aim: false)
-    press(spot(20, 50))
-    say("      target in front: \(frontmost() == "Target")")
-    probe(shared, at: spot(50, 150), aim: true)
-    probe(shared, at: spot(60, 160), aim: false)
-    mouse(.mouseMoved, spot(70, 170))
-    usleep(200_000)
-    probe(shared, at: spot(70, 170), aim: true)
-    say("      probes: 10/20 behind, pointer away, aimed or not; 30/40 behind, pointer there; 50/60 in front, pointer away; 70 in front, pointer there")
-    say("      clicks seen: \(events().filter { $0.contains("click") }.joined(separator: ", "))")
-    _ = try mcp.tool("key", ["keys": "cmd+a"])
-    let selectedInFront = try? wait("the selection", 3) { (text(of: shared.pid, kAXSelectedTextAttribute) ?? "").isEmpty ? nil : true }
-    say("      with the target in front cmd+a selects: \(selectedInFront ?? false), \(String(describing: selection(of: shared.pid)))")
-    _ = try mcp.tool("click", ["x": Double(inPicture(2, 111).x), "y": Double(inPicture(2, 111).y)])
-    usleep(500_000)
-    say("      with the target in front a click collapses the selection: \(String(describing: selection(of: shared.pid)))")
-    _ = try mcp.tool("click", ["x": Double(inPicture(80, 180).x), "y": Double(inPicture(80, 180).y)])
-    usleep(500_000)
-    say("      with the target in front the click at 80 180 arrives: \(events().contains("Target click 80 180"))")
+          events().filter { $0.hasPrefix("Other") }.joined(separator: ", "))
 
     keys(7, [.maskControl, .maskAlternate, .maskShift])
     let ended = try? wait("the hotkey to end the share", 5) { try mcp.tool("look").text.contains(nothingShared) ? true : nil }
