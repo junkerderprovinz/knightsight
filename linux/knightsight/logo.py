@@ -12,6 +12,8 @@ import cairo
 from .logo_shapes import HEIGHT, SHAPES, WIDTH
 
 OVERSAMPLING = 4
+# The app icons keep some air around the mark, as the GNOME icon grid expects.
+ICON_MARGIN = 0.06
 
 _drawn = {}
 
@@ -39,11 +41,11 @@ def _fill(ctx, rgb, steps):
     ctx.fill()
 
 
-def render(size):
+def render(size, margin=0.0):
     large = cairo.ImageSurface(cairo.FORMAT_ARGB32, size * OVERSAMPLING, size * OVERSAMPLING)
     ctx = cairo.Context(large)
     ctx.set_antialias(cairo.ANTIALIAS_NONE)
-    scale = large.get_width() / max(WIDTH, HEIGHT)
+    scale = large.get_width() * (1 - 2 * margin) / max(WIDTH, HEIGHT)
     ctx.translate((large.get_width() - WIDTH * scale) / 2, (large.get_height() - HEIGHT * scale) / 2)
     ctx.scale(scale, scale)
     for rgb, steps in SHAPES:
@@ -73,4 +75,4 @@ def draw(ctx, x, y, size, device_scale=1):
 
 
 if __name__ == "__main__":
-    render(int(sys.argv[1])).write_to_png(sys.argv[2])
+    render(int(sys.argv[1]), ICON_MARGIN).write_to_png(sys.argv[2])
