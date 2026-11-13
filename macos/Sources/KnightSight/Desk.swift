@@ -94,21 +94,21 @@ final class MacDesk: Desk {
         session.began(doing)
     }
 
-    func look(size: CGSize) throws -> Picture {
+    func look(size: CGSize) throws -> Screenshot {
         guard CGPreflightScreenCaptureAccess() else {
             throw Refused("KnightSight is not allowed to record the screen yet. The person at the Mac can turn it on in System Settings under Privacy & Security, Screen Recording.")
         }
         let chosen = try current()
         guard let id = chosen.window else {
             let image = try Capture.region(chosen.region, skipping: session.marks, size: size)
-            return Picture(png: Bitmap.png(image), title: chosen.title, note: nil)
+            return Screenshot(png: Bitmap.png(image), title: chosen.title, note: nil)
         }
         let shared = try window(id)
         let image = try Capture.window(shared, size: size)
         let note = Windows.fullyCovered(shared, skipping: session.marks)
             ? "The window is fully covered. Some programs, browsers among them, stop drawing then, so the picture may be out of date."
             : nil
-        return Picture(png: Bitmap.png(image), title: shared.title(say), note: note)
+        return Screenshot(png: Bitmap.png(image), title: shared.title(say), note: note)
     }
 
     func click(at point: CGPoint, right: Bool, double: Bool) throws -> String {

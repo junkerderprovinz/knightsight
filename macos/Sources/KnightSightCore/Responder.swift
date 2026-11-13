@@ -28,7 +28,7 @@ public struct Share {
 
     public static let maxEdge: CGFloat = 1568
 
-    /// Picture pixels per screen point: the screen's own density, scaled down until the
+    /// Screenshot pixels per screen point: the screen's own density, scaled down until the
     /// longer edge fits into maxEdge.
     public var scale: CGFloat {
         min(pixelsPerPoint, Share.maxEdge / max(area.width, area.height))
@@ -38,7 +38,7 @@ public struct Share {
         CGSize(width: max(1, (area.width * scale).rounded()), height: max(1, (area.height * scale).rounded()))
     }
 
-    /// Picture coordinates back to the screen, refused outside the share.
+    /// Screenshot coordinates back to the screen, refused outside the share.
     public func screenPoint(x: Double, y: Double) throws -> CGPoint {
         let p = CGPoint(x: area.minX + CGFloat(x) / scale, y: area.minY + CGFloat(y) / scale)
         guard area.contains(p) else { throw Refused("The point lies outside the share.") }
@@ -46,7 +46,7 @@ public struct Share {
     }
 }
 
-public struct Picture {
+public struct Screenshot {
     public var png: Data
     public var title: String
     public var note: String?
@@ -64,7 +64,7 @@ public protocol Desk: AnyObject {
     /// The share while sharing is on, nil otherwise.
     func currentShare() -> Share?
     func began(_ doing: String)
-    func look(size: CGSize) throws -> Picture
+    func look(size: CGSize) throws -> Screenshot
     func click(at point: CGPoint, right: Bool, double: Bool) throws -> String
     func scroll(at point: CGPoint, notches: Int) throws -> String
     func type(_ text: String) throws -> String

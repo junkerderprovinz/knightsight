@@ -34,9 +34,9 @@ final class FakeDesk: Desk {
 
     func began(_ doing: String) { labels.append(doing) }
 
-    func look(size: CGSize) throws -> Picture {
+    func look(size: CGSize) throws -> Screenshot {
         calls.append(.look(size))
-        return Picture(png: Data([1, 2, 3]), title: "Notes\nDraft", note: nil)
+        return Screenshot(png: Data([1, 2, 3]), title: "Notes\nDraft", note: nil)
     }
 
     func click(at point: CGPoint, right: Bool, double: Bool) throws -> String {
