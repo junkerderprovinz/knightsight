@@ -150,15 +150,15 @@ class Desk:
                 failed(2, {})
                 return
             node, props = streams[0]
-            done(Share(session, node, props, r.get("devices", 0) if remote else 0, self._frames(session, node)))
+            done(Share(session, node, props, r.get("devices", 0) if remote else 0, self._frames(session, node, kind)))
 
         self.requests.run(steps(), failed)
 
-    def _frames(self, session, node):
+    def _frames(self, session, node, kind):
         result, fds = self.bus.call_with_unix_fd_list_sync(
             BUS, PATH, SCREEN_CAST, "OpenPipeWireRemote", GLib.Variant("(oa{sv})", (session, {})),
             GLib.VariantType("(h)"), Gio.DBusCallFlags.NONE, -1, None, None)
-        return Frames(fds.get(result.unpack()[0]), node)
+        return Frames(fds.get(result.unpack()[0]), node, kind == WINDOW)
 
     def _close(self, session):
         self.bus.call(BUS, session, "org.freedesktop.portal.Session", "Close", None, None,
@@ -210,14 +210,14 @@ class Desk:
             started = time.monotonic()
 
             def first_frame():
-                shot = share.frames.surface()
-                if shot is None:
+                frame = share.frames.frame()
+                if frame is None:
                     if time.monotonic() - started < 5:
                         return True
                     self._drop(share)
                     done(None, say.NO_PORTAL)
                     return False
-                RegionPicker(shot, self._monitor(share) or monitor, picked).present()
+                RegionPicker(frame.surface(), self._monitor(share) or monitor, picked).present()
                 return False
 
             def picked(r):
@@ -283,37 +283,45 @@ class Desk:
     def minimized(self, share):
         return False
 
-    def look(self, share):
-        shot = share.frames.surface()
-        if shot is None:
+    def show(self, share, area, color, width, badge):
+        pass
+
+    def hide(self):
+        pass
+
+    @staticmethod
+    def _frame(share):
+        frame = share.frames.frame()
+        if frame is None:
             raise Refused("The desktop has not sent a picture of the share yet.")
-        r = share.region
-        reply = picture.encode(shot, (r.x, r.y, r.width, r.height) if r else None)
+        return frame
+
+    def look(self, share):
+        frame = self._frame(share)
+        r = share.region or frame.area
+        reply = picture.encode(frame.surface(), (r.x, r.y, r.width, r.height))
         reply["title"] = share.title
         return reply
 
-    def _frame_area(self, share):
-        if share.region:
-            return share.region
-        size = share.frames.size()
-        if size is None:
-            raise Refused("The desktop has not sent a picture of the share yet.")
-        return Rect(0, 0, *size)
+    def _point(self, share, args):
+        """Maps a point in the picture to the stream, which counts in the desktop's own units
+        and may differ from the frame's pixels."""
+        frame = self._frame(share)
+        x, y = protocol.to_area(share.region or frame.area, args)
+        sw, sh = share.props.get("size") or (frame.width, frame.height)
+        return x * sw / frame.width, y * sh / frame.height
 
     def _notify(self, share, method, signature, *args):
         self.bus.call_sync(BUS, PATH, REMOTE_DESKTOP, method, GLib.Variant(signature, (share.session, {}, *args)),
                            None, Gio.DBusCallFlags.NONE, -1, None)
 
     def _move(self, share, x, y):
-        """The stream counts in the desktop's own units, which may differ from the frame's pixels."""
         if not share.devices & POINTER:
             raise Refused("This desktop lets KnightSight look, but not click or type.")
-        fw, fh = share.frames.size()
-        sw, sh = share.props.get("size") or (fw, fh)
-        self._notify(share, "NotifyPointerMotionAbsolute", "(oa{sv}udd)", share.node, x * sw / fw, y * sh / fh)
+        self._notify(share, "NotifyPointerMotionAbsolute", "(oa{sv}udd)", share.node, x, y)
 
     def click(self, share, args):
-        x, y = protocol.to_area(self._frame_area(share), args)
+        x, y = self._point(share, args)
         right, twice = protocol.flag(args, "right"), protocol.flag(args, "double")
         self._move(share, x, y)
         self.panel.busy()
@@ -327,7 +335,7 @@ class Desk:
         return "Clicked. The desktop moved the pointer there."
 
     def scroll(self, share, args):
-        x, y = protocol.to_area(self._frame_area(share), args)
+        x, y = self._point(share, args)
         notches = round(protocol.number(args, "amount"))
         self._move(share, x, y)
         self.panel.busy()
@@ -353,7 +361,9 @@ class Desk:
         self._press(share, keysym, False)
         for m in reversed(mods):
             self._press(share, m, False)
-        time.sleep(0.005)
+        # GNOME can apply the release of a modifier after the keys that follow it, which
+        # then arrive as Ctrl+Return or Ctrl+Shift+A.
+        time.sleep(0.1 if mods else 0.005)
 
     def type(self, share, text):
         self._keys_allowed(share)

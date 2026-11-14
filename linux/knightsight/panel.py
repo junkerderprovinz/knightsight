@@ -2,6 +2,7 @@
 
 import math
 import time
+import traceback
 
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 
@@ -91,6 +92,7 @@ class Panel(Gtk.ApplicationWindow):
         self.pick_hint = ""
         self.dot_color = theme.NEUTRAL
         self.last_tick = time.monotonic()
+        self.last_error = None
         self.palette = theme.Palette(False)
         self.css = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), self.css,
@@ -228,6 +230,17 @@ class Panel(Gtk.ApplicationWindow):
         self.show_state()
 
     def tick(self):
+        # An exception would end the timer and freeze the card without a word. It comes back
+        # every frame, so each one is printed once.
+        try:
+            self.advance()
+        except Exception as e:
+            if repr(e) != self.last_error:
+                self.last_error = repr(e)
+                traceback.print_exc()
+        return True
+
+    def advance(self):
         now = time.monotonic()
         elapsed = (now - self.last_tick) * 1000
         self.last_tick = now
@@ -255,14 +268,14 @@ class Panel(Gtk.ApplicationWindow):
         c = self.chosen
         if c is None:
             self.desk.hide()
-            return True
+            return
         if self.desk.gone(c):
             self.forget()
             self.desk.hide()
-            return True
+            return
         if self.desk.hidden(c):
             self.desk.hide()
-            return True
+            return
 
         width = 3
         if not self.active:
@@ -284,14 +297,13 @@ class Panel(Gtk.ApplicationWindow):
             area = self.desk.area(c)
             if area is None:
                 self.desk.hide()
-                return True
+                return
             badge = None
             if self.badge_alpha > 0 and not self.badge_held:
                 badge = (self.doing, theme.ease(self.badge_alpha), self.pulse, self.palette)
             self.desk.show(c, area, color, width, badge)
         elif changed:
             self.canvas.queue_draw()
-        return True
 
     def busy(self):
         self.busy_until = time.monotonic() + BUSY_SPAN
