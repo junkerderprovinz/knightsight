@@ -1,0 +1,6 @@
+{
+  "uuid": "smoke-helper@knightsight.test",
+  "name": "KnightSight smoke helper",
+  "description": "Steers a throwaway GNOME Shell for the Wayland smoke test.",
+  "shell-version": ["46", "47", "48", "49", "50", "51"]
+}

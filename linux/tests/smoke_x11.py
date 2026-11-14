@@ -4,51 +4,19 @@ itself, and drives the share through the real MCP server.
 Needs DISPLAY, a session bus, openbox, xdotool, Tk and node: tests/smoke-x11.sh sets them up.
 """
 
-import base64
-import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-LINUX = os.path.dirname(HERE)
-REPO = os.path.dirname(LINUX)
-sys.path.insert(0, LINUX)
+from harness import HERE, LINUX, Mcp, image_of, listening, pixel, run, spawn, stop_all, text_of, wait_for
 
-import gi  # noqa: E402
-
-gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import GdkPixbuf  # noqa: E402
-
-from knightsight import protocol, xlib  # noqa: E402
+from knightsight import protocol, xlib
 
 NOTHING = protocol.NOTHING_SHARED
-started = []
-
-
-def run(*args):
-    return subprocess.run(args, check=True, capture_output=True, text=True).stdout.strip()
-
-
-def spawn(*args, **kw):
-    p = subprocess.Popen(args, **kw)
-    started.append(p)
-    return p
-
-
-def wait_for(check, what, seconds=15):
-    end = time.monotonic() + seconds
-    while time.monotonic() < end:
-        value = check()
-        if value:
-            return value
-        time.sleep(0.1)
-    raise AssertionError("timed out waiting for " + what)
 
 
 def window(name):
@@ -86,16 +54,6 @@ def drag(x0, y0, x1, y1):
     time.sleep(0.5)
 
 
-def pixel(png, x, y):
-    loader = GdkPixbuf.PixbufLoader()
-    loader.write(base64.b64decode(png))
-    loader.close()
-    pb = loader.get_pixbuf()
-    data = pb.get_pixels()
-    i = y * pb.get_rowstride() + x * pb.get_n_channels()
-    return tuple(data[i:i + 3])
-
-
 def screen_pixel(x, y):
     d = xlib.Display()
     try:
@@ -103,36 +61,6 @@ def screen_pixel(x, y):
         return data[2], data[1], data[0]
     finally:
         d.close()
-
-
-def listening():
-    with socket.socket() as s:
-        return s.connect_ex(("127.0.0.1", protocol.PORT)) == 0
-
-
-class Mcp:
-    def __init__(self):
-        self.p = spawn("node", os.path.join(REPO, "mcp", "knightsight-mcp.mjs"), stdin=subprocess.PIPE,
-                       stdout=subprocess.PIPE, text=True)
-        self.n = 0
-        self.call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
-
-    def call(self, method, params):
-        self.n += 1
-        self.p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": self.n, "method": method, "params": params}) + "\n")
-        self.p.stdin.flush()
-        return json.loads(self.p.stdout.readline())["result"]
-
-    def tool(self, name, **args):
-        return self.call("tools/call", {"name": name, "arguments": args})
-
-
-def text_of(result):
-    return "\n".join(c["text"] for c in result["content"] if c["type"] == "text")
-
-
-def image_of(result):
-    return next(c["data"] for c in result["content"] if c["type"] == "image")
 
 
 class SmokeX11(unittest.TestCase):
@@ -161,9 +89,7 @@ class SmokeX11(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        for p in reversed(started):
-            p.kill()
-            p.wait()
+        stop_all()
         cls.log.close()
         os.unlink(cls.log.name)
 

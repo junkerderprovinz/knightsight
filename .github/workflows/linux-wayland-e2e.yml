@@ -1,0 +1,52 @@
+name: Linux Wayland end to end
+
+# Starts a headless GNOME Shell on Wayland, shares a text editor through the desktop's own
+# portal dialog and works in it through the MCP server. The pictures it took and the logs
+# of the shell, the panel and the editor stay as an artifact.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "linux/**"
+      - "mcp/**"
+      - ".github/workflows/linux-wayland-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install GNOME Shell, its portal, PipeWire and the panel's libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            gnome-shell xwayland xdg-desktop-portal xdg-desktop-portal-gnome pipewire wireplumber \
+            gnome-text-editor at-spi2-core gir1.2-atspi-2.0 \
+            python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+            gstreamer1.0-pipewire fonts-noto-core
+          fc-cache
+
+      - name: Show the versions under test
+        run: dpkg-query -W gnome-shell mutter-common xdg-desktop-portal-gnome pipewire gstreamer1.0-pipewire
+
+      - name: Share a window and work in it
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: PATH=/usr/bin:$PATH sh linux/tests/smoke-wayland.sh e2e
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: knightsight-${{ matrix.os }}-wayland-e2e
+          path: e2e
+          if-no-files-found: error
