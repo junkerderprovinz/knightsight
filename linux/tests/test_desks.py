@@ -33,8 +33,8 @@ def offered(name):
 
 
 class Desks(unittest.TestCase):
-    def test_both_desks_offer_what_the_panel_and_the_protocol_use(self):
-        needed = used("panel.py", "desk") | used("protocol.py", "desk")
+    def test_both_desks_offer_what_the_panel_the_pinboard_and_the_protocol_use(self):
+        needed = used("panel.py", "desk") | used("protocol.py", "desk") | used("pinboard.py", "desk")
         self.assertIn("hide", needed)
         for module in ("x11.py", "portal.py"):
             with self.subTest(module):

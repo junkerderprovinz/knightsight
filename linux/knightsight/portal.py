@@ -247,26 +247,30 @@ class Desk:
                 return monitors.get_item(i)
         return None
 
-    def bind_hotkey(self, stop):
-        """Asks the desktop for Ctrl+Alt+Shift+X once, the first time something is shared."""
+    def bind_hotkey(self, pressed):
+        """Asks the desktop for Ctrl+Alt+Shift+X and P once, the first time something is shared.
+        pressed gets the name of the one pressed."""
         if self.shortcuts or self._property(SHORTCUTS, "version") is None:
             return
         self.shortcuts = "asking"
 
+        def shortcut(description, key):
+            return {"description": GLib.Variant("s", description),
+                    "preferred_trigger": GLib.Variant("s", "CTRL+ALT+SHIFT+" + key)}
+
         def steps():
             r = yield SHORTCUTS, "CreateSession", "(a{sv})", (), {"session_handle_token": GLib.Variant("s", self.requests.token())}
             session = r["session_handle"]
-            shortcut = {"description": GLib.Variant("s", say.STOP_SHARE),
-                        "preferred_trigger": GLib.Variant("s", "CTRL+ALT+SHIFT+x")}
             self.shortcuts = session
             self.bus.signal_subscribe(BUS, SHORTCUTS, "Activated", PATH, session, Gio.DBusSignalFlags.NONE,
-                                      lambda *_: stop())
-            yield SHORTCUTS, "BindShortcuts", "(oa(sa{sv})s)", (session, [("stop", shortcut)], ""), {}
+                                      lambda _bus, _sender, _path, _iface, _name, params: pressed(params.unpack()[1]))
+            shortcuts = [("stop", shortcut(say.STOP_SHARE, "x")), ("pinboard", shortcut(say.PINBOARD, "p"))]
+            yield SHORTCUTS, "BindShortcuts", "(oa(sa{sv})s)", (session, shortcuts, ""), {}
 
         self.requests.run(steps(), lambda *_: None)
 
     def hotkey_pressed(self):
-        return False
+        return None
 
     def title(self, share):
         return share.title
@@ -296,10 +300,14 @@ class Desk:
             raise Refused("The desktop has not sent a picture of the share yet.")
         return frame
 
-    def look(self, share):
+    def still(self, share):
+        """The share in full resolution, cut from the newest frame."""
         frame = self._frame(share)
         r = share.region or frame.area
-        reply = picture.encode(frame.surface(), (r.x, r.y, r.width, r.height))
+        return picture.cut(frame.surface(), r.x, r.y, r.width, r.height)
+
+    def look(self, share):
+        reply = picture.encode(self.still(share))
         reply["title"] = share.title
         return reply
 

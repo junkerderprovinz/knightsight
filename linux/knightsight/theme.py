@@ -2,6 +2,8 @@
 
 from gi.repository import Gio, GLib, Gtk
 
+from . import notes
+
 ACCENT = (252, 196, 25)
 ACCENT_HOVER = (253, 214, 94)
 ACCENT_INK = (22, 22, 22)
@@ -56,6 +58,9 @@ def animations():
 
 
 def css(p):
+    # The chosen kind of a note is filled in its colour, with the same dark ink on all three.
+    kinds = "\n".join(f".soft.{kind} {{ background: {web(c)}; color: {web(ACCENT_INK)}; }}"
+                      for kind, c in notes.KIND_COLOURS.items())
     return f"""
 window.knightsight, window.knightsight .bar {{ background: {web(p.ground)}; }}
 window.knightsight {{ font-family: "Noto Sans", sans-serif; }}
@@ -77,6 +82,26 @@ window.knightsight {{ font-family: "Noto Sans", sans-serif; }}
 .soft.blank > .square {{ border-radius: 6px; transition: background {CONTROL_MS}ms ease-out; }}
 .soft.blank:hover {{ color: {web(p.text)}; }}
 .soft.blank:hover > .square {{ background: {web(p.hover)}; }}
+.soft.lit {{ background: {web(ACCENT)}; color: {web(ACCENT_INK)}; }}
+.soft.lit:hover {{ background: {web(ACCENT_HOVER)}; }}
+{kinds}
+window.pinboard {{ color: {web(p.text)}; }}
+.pinboard .card {{ background: {web(p.surface)}; border-radius: 10px; padding: 16px; }}
+.pinboard .heading {{ font-weight: 600; font-size: 16px; }}
+.pinboard .count {{ color: {web(p.muted)}; font-weight: 600; font-size: 14px; }}
+.pinboard .muted {{ color: {web(p.muted)}; font-size: 12px; }}
+.pinboard list {{ background: none; }}
+.pinboard row {{ border-radius: 6px; padding: 6px 8px; transition: background {CONTROL_MS}ms ease-out; }}
+.pinboard row:hover {{ background: {web(p.hover)}; }}
+.pinboard .field {{ background: {web(p.surface2)}; border-radius: 6px; padding: 8px 10px; }}
+.pinboard .field:focus-within {{ box-shadow: inset 0 0 0 2px {web(ACCENT)}; }}
+.pinboard textview, .pinboard textview text {{ background: none; color: {web(p.text)}; font-size: 14px; }}
+.pinboard .placeholder {{ color: {web(p.muted)}; font-size: 14px; }}
+.pinboard entry {{
+  min-height: 34px; padding: 0 10px; border: none; outline: none; box-shadow: none; border-radius: 6px;
+  background: {web(p.surface2)}; color: {web(p.text)}; font-size: 14px;
+}}
+.pinboard entry:focus-within {{ box-shadow: inset 0 0 0 2px {web(ACCENT)}; }}
 tooltip.background {{ background: {web(p.tip)}; color: #f4f4f4; border-radius: 6px; }}
 tooltip > box {{ padding: 8px 12px; }}
 tooltip label {{ font-size: 13px; }}

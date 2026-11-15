@@ -6,7 +6,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["LANGUAGE"] = "en"
 
-from knightsight import protocol  # noqa: E402
+from knightsight import notes, protocol  # noqa: E402
 from knightsight.protocol import Rect, Refused  # noqa: E402
 
 
@@ -43,6 +43,7 @@ class Panel:
         self.desk = Desk()
         self.shared = area if shared else None
         self.doing = None
+        self.rounds = notes.Rounds()
 
     def share(self):
         return self.shared
@@ -101,6 +102,28 @@ class Replies(unittest.TestCase):
         self.assertEqual(panel.doing, "Right-clicking")
         ask(panel, cmd="key", keys="ctrl+pageup")
         self.assertEqual(panel.doing, "Pressing Ctrl+Page Up")
+
+
+class Notes(unittest.TestCase):
+    def test_notes_are_answered_while_nothing_is_shared(self):
+        panel = Panel(shared=False)
+        self.assertEqual(ask(panel, cmd="notes"), {"ok": True, "round": 0})
+        panel.rounds.send({"title": "Test", "notes": []})
+        self.assertEqual(ask(panel, cmd="notes")["round"], 1)
+
+    def test_asking_for_notes_is_no_work(self):
+        panel = Panel()
+        panel.rounds.send({"title": "Test", "notes": []})
+        ask(panel, cmd="notes")
+        ask(panel, cmd="notes", unread=True)
+        self.assertIsNone(panel.doing)
+
+    def test_unread_hands_a_round_out_once(self):
+        panel = Panel()
+        panel.rounds.send({"title": "Test", "notes": []})
+        self.assertEqual(ask(panel, cmd="notes", unread=True), {"ok": True, "round": 1, "title": "Test", "notes": []})
+        self.assertEqual(ask(panel, cmd="notes", unread=True), {"ok": True, "round": 1})
+        self.assertEqual(ask(panel, cmd="notes")["title"], "Test")
 
 
 class Points(unittest.TestCase):

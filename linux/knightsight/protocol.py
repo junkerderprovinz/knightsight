@@ -169,6 +169,10 @@ def reply(line, panel):
         args = json.loads(line)
         if not isinstance(args, dict):
             raise Refused("A request is one JSON object.")
+        # The person sent these on purpose, shared or not, and the MCP server polls for them
+        # every second while it waits, so they are no work that lights the frame.
+        if args.get("cmd") == "notes":
+            return json.dumps(panel.rounds.answer(flag(args, "unread")))
         share = panel.share()
         if share is None:
             raise Refused(NOTHING_SHARED)

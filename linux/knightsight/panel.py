@@ -6,7 +6,10 @@ import traceback
 
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 
-from . import glyphs, logo, say, theme
+from . import glyphs, logo, notes, say, theme, widgets
+from .pinboard import Pinboard
+from .protocol import Refused
+from .widgets import bar_button, button
 
 WIDTH, HEIGHT, BAR, GUTTER = 580, 212, 40, 16
 CARD = (GUTTER, 0, WIDTH - 2 * GUTTER, HEIGHT - BAR - GUTTER)
@@ -15,59 +18,7 @@ CARD = (GUTTER, 0, WIDTH - 2 * GUTTER, HEIGHT - BAR - GUTTER)
 WORK_SPAN = 5.0
 PULSE_MS = 1400
 BUSY_SPAN = 0.8
-
-
-def _font(size, bold):
-    f = Pango.FontDescription.from_string("Noto Sans")
-    f.set_absolute_size(size * Pango.SCALE)
-    if bold:
-        f.set_weight(Pango.Weight.SEMIBOLD)
-    return f
-
-
-class Glyph(Gtk.DrawingArea):
-    def __init__(self, name, size=16):
-        super().__init__(content_width=size, content_height=size, halign=Gtk.Align.CENTER,
-                         valign=Gtk.Align.CENTER)
-        self.name = name
-        self.set_draw_func(self._draw)
-
-    def _draw(self, _area, ctx, width, _height):
-        c = self.get_color()
-        ctx.set_source_rgba(c.red, c.green, c.blue, c.alpha)
-        glyphs.draw(ctx, self.name, width)
-
-    def show_glyph(self, name):
-        self.name = name
-        self.queue_draw()
-
-
-def _button(glyph, text, width, height, *classes):
-    b = Gtk.Button(css_classes=["soft", *classes], width_request=width, height_request=height)
-    b.set_cursor(Gdk.Cursor.new_from_name("pointer"))
-    box = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-    b.glyph = Glyph(glyph)
-    box.append(b.glyph)
-    b.label = None
-    if text:
-        b.label = Gtk.Label(label=text)
-        box.append(b.label)
-    b.set_child(box)
-    # The icon's ink comes from the button's colour, which changes with hover and state.
-    b.connect("state-flags-changed", lambda *_: b.glyph.queue_draw())
-    return b
-
-
-def _bar_button(glyph, name, action):
-    b = Gtk.Button(css_classes=["soft", "blank"], width_request=44, height_request=BAR, tooltip_text=name)
-    square = Gtk.CenterBox(css_classes=["square"], width_request=28, height_request=28, halign=Gtk.Align.CENTER,
-                           valign=Gtk.Align.CENTER)
-    b.glyph = Glyph(glyph)
-    square.set_center_widget(b.glyph)
-    b.set_child(square)
-    b.connect("state-flags-changed", lambda *_: b.glyph.queue_draw())
-    b.connect("clicked", lambda _b: action())
-    return b
+TOGGLE_SPAN = 0.4
 
 
 class Panel(Gtk.ApplicationWindow):
@@ -93,6 +44,12 @@ class Panel(Gtk.ApplicationWindow):
         self.dot_color = theme.NEUTRAL
         self.last_tick = time.monotonic()
         self.last_error = None
+        self.board = notes.Board()
+        self.rounds = notes.Rounds()
+        self.pinboard = None
+        self.toggle_gate = notes.Gate(TOGGLE_SPAN)
+        self.board_notice = None
+        self.awaiting_fetch = False
         self.palette = theme.Palette(False)
         self.css = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), self.css,
@@ -101,8 +58,8 @@ class Panel(Gtk.ApplicationWindow):
         bar = Gtk.WindowHandle(css_classes=["bar"], height_request=BAR)
         row = Gtk.Box()
         row.append(Gtk.Box(hexpand=True))
-        row.append(_bar_button("minimise", say.MINIMISE, self.minimize))
-        row.append(_bar_button("close", say.CLOSE, self.close))
+        row.append(bar_button("minimise", say.MINIMISE, self.minimize, BAR))
+        row.append(bar_button("close", say.CLOSE, self.close, BAR))
         bar.set_child(row)
         self.set_titlebar(bar)
 
@@ -113,33 +70,39 @@ class Panel(Gtk.ApplicationWindow):
         fixed = Gtk.Fixed()
         fixed.put(self.canvas, 0, 0)
         buttons_y = cy + ch - 20 - 40
-        self.pick_window = _button("window", say.PICK_WINDOW, 148, 36)
-        self.pick_region = _button("region", say.PICK_REGION, 148, 36)
-        self.toggle = _button("start", say.START_SHARE, 176, 40, "primary")
-        self.info = _button("info", "", 28, 28, "round")
+        self.pick_window = button("window", say.PICK_WINDOW, 148, 36)
+        self.pick_region = button("region", say.PICK_REGION, 148, 36)
+        self.toggle = button("start", say.START_SHARE, 176, 40, "primary")
+        self.pin = button("pin", "", 28, 28, "round")
+        self.pin.set_tooltip_text(say.PINBOARD_TIP)
+        self.info = button("info", "", 28, 28, "round")
+        self.buttons_left = cx + cw - 20 - 28 - 8 - 28
         fixed.put(self.pick_window, cx + 20, buttons_y + 2)
         fixed.put(self.pick_region, cx + 176, buttons_y + 2)
         fixed.put(self.toggle, cx + cw - 20 - 176, buttons_y)
+        fixed.put(self.pin, self.buttons_left, cy + 18)
         fixed.put(self.info, cx + cw - 20 - 28, cy + 18)
-        self.info_left = cx + cw - 20 - 28
         self.info.set_cursor(Gdk.Cursor.new_from_name("help"))
         self.set_child(fixed)
 
         self.pick_window.connect("clicked", lambda _b: self.choose_window())
         self.pick_region.connect("clicked", lambda _b: self.choose_region())
         self.toggle.connect("clicked", lambda _b: self.stop() if self.active else self.start())
+        self.pin.connect("clicked", lambda _b: self.toggle_pinboard())
 
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control><Alt><Shift>x"),
                                        action=Gtk.CallbackAction.new(lambda *_: self.stop() or True)))
+        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control><Alt><Shift>p"),
+                                       action=Gtk.CallbackAction.new(lambda *_: self.toggle_pinboard() or True)))
         self.add_controller(keys)
-        self.connect("notify::is-active", lambda *_: setattr(self, "focused", self.is_active()))
+        self.connect("notify::is-active", lambda *_: self.focus_moved())
         self.connect("close-request", self.on_close)
 
         self.desk = make_desk(self)
         self.info.set_tooltip_text(self.desk.help)
-        self.title_font = _font(16, True)
-        self.body_font = _font(13, False)
+        self.title_font = widgets.font(16, True)
+        self.body_font = widgets.font(13, False)
         GLib.timeout_add(16, self.tick)
         self.show_state()
 
@@ -147,9 +110,12 @@ class Panel(Gtk.ApplicationWindow):
         self.palette = palette
         self.css.load_from_string(theme.css(palette))
         self.canvas.queue_draw()
+        if self.pinboard is not None:
+            self.pinboard.restyle()
 
     def on_close(self, _window):
         self.active = False
+        self.close_pinboard()
         self.desk.close()
         return False
 
@@ -162,6 +128,10 @@ class Panel(Gtk.ApplicationWindow):
             sub = self.notice or say.CHOOSE_TARGET
         elif self.active and self.working_now:
             sub = say.DOING + self.doing
+        elif self.pinboard is not None:
+            sub = say.PINBOARD_ON
+        elif self.active and self.board_notice:
+            sub = self.board_notice
         elif self.active:
             sub = say.SHARED
         else:
@@ -175,6 +145,11 @@ class Panel(Gtk.ApplicationWindow):
         self.toggle.set_sensitive(c is not None)
         self.toggle.label.set_label(say.STOP_SHARE if self.active else say.START_SHARE)
         self.toggle.glyph.show_glyph("stop" if self.active else "start")
+        self.pin.set_sensitive(self.active)
+        if self.pinboard is None:
+            self.pin.remove_css_class("lit")
+        else:
+            self.pin.add_css_class("lit")
         self.canvas.queue_draw()
 
     def choose_window(self):
@@ -207,6 +182,7 @@ class Panel(Gtk.ApplicationWindow):
         self.picking = False
         if share is not None:
             self.chosen = share
+            self.board.clear()
         self.notice = notice
         self.set_visible(True)
         self.present()
@@ -215,6 +191,7 @@ class Panel(Gtk.ApplicationWindow):
     def forget(self):
         self.chosen = None
         self.active = False
+        self.close_pinboard()
         self.desk.release()
         self.show_state()
 
@@ -222,11 +199,56 @@ class Panel(Gtk.ApplicationWindow):
         if self.chosen is None:
             return
         self.active = True
-        self.desk.bind_hotkey(self.stop)
+        self.board_notice = None
+        self.desk.bind_hotkey(self.hotkey)
         self.show_state()
 
     def stop(self):
         self.active = False
+        self.close_pinboard()
+        self.show_state()
+
+    def hotkey(self, name):
+        if name == "stop":
+            self.stop()
+        elif name == "pinboard":
+            self.toggle_pinboard()
+
+    def toggle_pinboard(self):
+        if not self.toggle_gate.open():
+            return
+        if self.pinboard is not None:
+            self.close_pinboard()
+            return
+        if not self.active:
+            return
+        try:
+            shot = self.desk.still(self.chosen)
+        except Refused:
+            self.board_notice = say.NO_PICTURE
+            self.show_state()
+            return
+        self.board_notice = None
+        self.pinboard = Pinboard(self, shot, self.pinboard_closed)
+        self.pinboard.present()
+        self.show_state()
+
+    def close_pinboard(self):
+        if self.pinboard is not None:
+            self.pinboard.close()
+
+    def pinboard_closed(self):
+        self.pinboard = None
+        self.focus_moved()
+        self.show_state()
+
+    def focus_moved(self):
+        # Keys from the portal land wherever the focus is, so a note being written refuses them too.
+        self.focused = self.is_active() or self.pinboard is not None and self.pinboard.is_active()
+
+    def sent(self, count):
+        self.board_notice = say.sent(count)
+        self.awaiting_fetch = True
         self.show_state()
 
     def tick(self):
@@ -248,8 +270,11 @@ class Panel(Gtk.ApplicationWindow):
         if self.swap < 1:
             self.swap = theme.step(self.swap, 1, elapsed, theme.CONTENT_MS if moving else 0)
             self.canvas.queue_draw()
-        if self.desk.hotkey_pressed():
-            self.stop()
+        self.hotkey(self.desk.hotkey_pressed())
+        if self.awaiting_fetch and self.rounds.read:
+            self.awaiting_fetch = False
+            self.board_notice = say.FETCHED
+            self.show_state()
 
         working = self.active and now - self.last_request < WORK_SPAN
         ms = now * 1000 % PULSE_MS
@@ -325,7 +350,7 @@ class Panel(Gtk.ApplicationWindow):
         size = 52
         logo.draw(ctx, cx + 20, cy + 18, size, self.get_scale_factor())
         tx = cx + 20 + size + 16
-        ty, tw = cy + 20, self.info_left - 12 - tx
+        ty, tw = cy + 20, self.buttons_left - 12 - tx
         d, dy = 8, ty + 26 + 10
         if self.working_now and theme.animations():
             ctx.set_source_rgba(*theme.rgb(theme.WARNING), 80 / 255 * self.pulse)
@@ -360,4 +385,5 @@ class Panel(Gtk.ApplicationWindow):
 
     def working(self, doing):
         self.doing = doing
+        self.board_notice = None
         self.last_request = time.monotonic()

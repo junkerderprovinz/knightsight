@@ -126,30 +126,41 @@ class Desk:
         self.lent = 0
         self.scratch = None
         self.frame = Frame(self.ui)
-        self.hotkey = self._grab_hotkey()
+        self.hotkeys = self._grab_hotkeys()
+        self.released = {}
 
     def close(self):
         self.frame.hide()
 
-    def _grab_hotkey(self):
-        code = xlib.XKeysymToKeycode(self.ui.d, xlib.XStringToKeysym(b"x"))
+    def _grab_hotkeys(self):
+        """Ctrl+Alt+Shift+X and P, by their keycodes."""
         mods = xlib.ControlMask | xlib.Mod1Mask | xlib.ShiftMask
-        # Caps Lock and Num Lock count as modifiers too, so each of their states needs its own grab.
-        for extra in (0, xlib.LockMask, xlib.Mod2Mask, xlib.LockMask | xlib.Mod2Mask):
-            xlib.XGrabKey(self.ui.d, code, mods | extra, self.ui.root, True, xlib.GrabModeAsync, xlib.GrabModeAsync)
+        codes = {}
+        for key, name in ((b"x", "stop"), (b"p", "pinboard")):
+            code = xlib.XKeysymToKeycode(self.ui.d, xlib.XStringToKeysym(key))
+            # Caps Lock and Num Lock count as modifiers too, so each of their states needs its own grab.
+            for extra in (0, xlib.LockMask, xlib.Mod2Mask, xlib.LockMask | xlib.Mod2Mask):
+                xlib.XGrabKey(self.ui.d, code, mods | extra, self.ui.root, True, xlib.GrabModeAsync, xlib.GrabModeAsync)
+            codes[code] = name
         self.ui.failed()
-        return code
+        return codes
 
     def hotkey_pressed(self):
-        pressed = False
+        """The name of the hotkey pressed since the last call, or None."""
+        pressed = None
         event = xlib.XEvent()
         while xlib.XPending(self.ui.d):
             xlib.XNextEvent(self.ui.d, byref(event))
-            if event.type == xlib.KeyPress and event.xkey.keycode == self.hotkey:
-                pressed = True
+            key = event.xkey
+            if event.type == xlib.KeyRelease:
+                self.released[key.keycode] = key.time
+            # A held key repeats as a release and a press at the same moment, which would
+            # open and close the pinboard over and over.
+            elif event.type == xlib.KeyPress and key.time - self.released.get(key.keycode, 0) > 1:
+                pressed = self.hotkeys.get(key.keycode, pressed)
         return pressed
 
-    def bind_hotkey(self, _stop):
+    def bind_hotkey(self, _pressed):
         pass
 
     def pick_window(self, done):
@@ -236,19 +247,31 @@ class Desk:
 
     def look(self, share):
         if share.window:
-            shot = self._window_shot(share.window)
-            reply = picture.encode(shot)
+            reply = picture.encode(self._window_shot(share.window, self.workw))
             reply["title"] = self.workw.title(share.window)
             return reply
-        r = share.region
-        with self._badge_away(r):
-            pixels = self.work.image(self.work.root, r.x, r.y, r.width, r.height)
+        with self._badge_away(share.region):
+            shot = self._region_shot(share.region, self.work)
+        reply = picture.encode(shot)
+        reply["title"] = share.title
+        return reply
+
+    def still(self, share):
+        """The share in full resolution for the pinboard, taken on the panel's own connection."""
+        if share.window:
+            return self._window_shot(share.window, self.uiw)
+        if self.frame.inside(share.region):
+            self.frame.hide_badge()
+            time.sleep(0.04)
+        return self._region_shot(share.region, self.ui)
+
+    @staticmethod
+    def _region_shot(r, x):
+        pixels = x.image(x.root, r.x, r.y, r.width, r.height)
         if pixels is None:
             raise Refused("The region lies off the screen.")
         data, stride, _ = pixels
-        reply = picture.encode(picture.surface(data, stride, r.width, r.height, False))
-        reply["title"] = share.title
-        return reply
+        return picture.surface(data, stride, r.width, r.height, False)
 
     @contextmanager
     def _badge_away(self, r):
@@ -266,8 +289,9 @@ class Desk:
         finally:
             self.panel.badge_held = False
 
-    def _window_shot(self, w):
-        x, wins = self.work, self.workw
+    @staticmethod
+    def _window_shot(w, wins):
+        x = wins.x
         area = wins.bounds(w)
         if area is None or area.width <= 0 or area.height <= 0:
             raise Refused("The shared window has no size right now.")

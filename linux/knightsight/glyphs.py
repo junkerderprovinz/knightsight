@@ -58,6 +58,27 @@ def draw(ctx, glyph, s):
         ctx.move_to(s / 2, s * 0.45)
         ctx.line_to(s / 2, s * 0.73)
         ctx.stroke()
+    elif glyph == "pin":
+        cx, cy, r = s / 2, s * 0.4, s * 0.32
+        ctx.arc(cx, cy, r, math.radians(150), math.radians(390))
+        ctx.line_to(cx, s * 0.94)
+        ctx.close_path()
+        ctx.stroke()
+        ctx.arc(cx, cy, s * 0.1, 0, 2 * math.pi)
+        ctx.fill()
+    elif glyph == "refresh":
+        c, r, end = s / 2, s * 0.36, math.radians(300)
+        ctx.arc(c, c, r, math.radians(30), end)
+        ctx.stroke()
+        ex, ey = c + r * math.cos(end), c + r * math.sin(end)
+        along, out, a = (-math.sin(end), math.cos(end)), (math.cos(end), math.sin(end)), s * 0.22
+        ctx.move_to(ex + along[0] * a * 0.6, ey + along[1] * a * 0.6)
+        for side in (1, -1):
+            ctx.line_to(ex + side * out[0] * a * 0.5 - along[0] * a * 0.4,
+                        ey + side * out[1] * a * 0.5 - along[1] * a * 0.4)
+        ctx.close_path()
+        ctx.fill_preserve()
+        ctx.stroke()
     elif glyph == "minimise":
         rounded(ctx, 0, s * 6 / 14, s, s * 2 / 14, s / 14)
         ctx.fill()

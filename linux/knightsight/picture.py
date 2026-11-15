@@ -12,8 +12,16 @@ def surface(data, stride, width, height, alpha):
     return cairo.ImageSurface.create_for_data(data, fmt, width, height, stride)
 
 
-def encode(source, crop=None):
-    """The reply fields for look: the picture scaled to the protocol's size limit, as PNG."""
+def cut(source, x, y, width, height):
+    out = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+    ctx = cairo.Context(out)
+    ctx.set_source_surface(source, -x, -y)
+    ctx.paint()
+    return out
+
+
+def scaled(source, crop=None):
+    """The picture, or the crop x, y, w, h of it, scaled down to the protocol's size limit."""
     x, y, w, h = crop or (0, 0, source.get_width(), source.get_height())
     pw, ph = protocol.picture_size(w, h)
     out = cairo.ImageSurface(cairo.FORMAT_RGB24, pw, ph)
@@ -22,6 +30,16 @@ def encode(source, crop=None):
     ctx.set_source_surface(source, -x, -y)
     ctx.get_source().set_filter(cairo.FILTER_BEST)
     ctx.paint()
-    png = io.BytesIO()
-    out.write_to_png(png)
-    return {"image": base64.b64encode(png.getvalue()).decode("ascii"), "width": pw, "height": ph}
+    return out
+
+
+def png(surface):
+    out = io.BytesIO()
+    surface.write_to_png(out)
+    return base64.b64encode(out.getvalue()).decode("ascii")
+
+
+def encode(source):
+    """The reply fields for look."""
+    out = scaled(source)
+    return {"image": png(out), "width": out.get_width(), "height": out.get_height()}
