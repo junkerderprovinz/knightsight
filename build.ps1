@@ -1,7 +1,8 @@
 # Builds KnightSight.exe with the .NET Framework compiler that ships with Windows, so
 # nothing needs installing. Noto Sans is fetched once and embedded, and the icon is
-# drawn by the same code as the logo in the window.
-param([string]$Out = (Join-Path $PSScriptRoot 'dist\KnightSight.exe'))
+# drawn by the same code as the logo in the window. -Test builds src\Tests.cs with the
+# rest of src into obj\ and runs it instead.
+param([string]$Out = (Join-Path $PSScriptRoot 'dist\KnightSight.exe'), [switch]$Test)
 $ErrorActionPreference = 'Stop'
 
 $sources = 'KnightSight.cs', 'LogoShapes.cs' | ForEach-Object { Join-Path $PSScriptRoot "src\$_" }
@@ -15,6 +16,15 @@ $fonts = foreach ($name in 'NotoSans-Regular.ttf', 'NotoSans-SemiBold.ttf') {
     $path = Join-Path $work $name
     if (-not (Test-Path $path)) { Invoke-WebRequest "$noto/$name" -OutFile $path -UseBasicParsing }
     $path
+}
+
+$resources = $fonts | ForEach-Object { "/resource:$_,$(Split-Path $_ -Leaf)" }
+if ($Test) {
+    $tests = Join-Path $work 'KnightSightTests.exe'
+    & $csc /nologo /target:exe /platform:anycpu /codepage:65001 "/out:$tests" /main:KnightSight.Tests /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @resources $sources (Join-Path $PSScriptRoot 'src\Tests.cs')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $tests
+    exit $LASTEXITCODE
 }
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, System.Web.Extensions
@@ -46,7 +56,6 @@ foreach ($image in $images) { $w.Write($image) }
 $w.Close()
 
 # AnyCPU without a preference for 32 bit, so one file runs on x64 and on ARM64 alike.
-$resources = $fonts | ForEach-Object { "/resource:$_,$(Split-Path $_ -Leaf)" }
 & $csc /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 "/out:$Out" "/win32icon:$ico" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @resources $sources
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 "built $Out"
