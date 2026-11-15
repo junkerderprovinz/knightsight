@@ -125,6 +125,19 @@ class Notes(unittest.TestCase):
         self.assertEqual(ask(panel, cmd="notes", unread=True), {"ok": True, "round": 1})
         self.assertEqual(ask(panel, cmd="notes")["title"], "Test")
 
+    def test_a_note_arrives_with_its_marks(self):
+        panel = Panel(shared=False)
+        note = notes.Note(3, "bug", "Too tight", "Junker", [notes.Mark(120, 80, 160, 40), notes.Mark(400, 300)])
+        panel.rounds.send(notes.assemble("Editor", 1000, 800, [note], "FRAME", lambda *_: "CROP", "2026-11-15T13:03:12Z"))
+        reply = ask(panel, cmd="notes")
+        self.assertEqual(reply["notes"], [{
+            "number": 3, "kind": "bug", "text": "Too tight", "author": "Junker", "marks": [
+                {"label": "3a", "x": 120, "y": 80, "width": 160, "height": 40, "image": "CROP"},
+                {"label": "3b", "x": 400, "y": 300, "pin": True, "image": "CROP"}]}])
+        self.assertEqual({k: reply[k] for k in ("round", "sent", "title", "width", "height", "image")},
+                         {"round": 1, "sent": "2026-11-15T13:03:12Z", "title": "Editor", "width": 1000,
+                          "height": 800, "image": "FRAME"})
+
 
 class Points(unittest.TestCase):
     def test_small_share_maps_one_to_one(self):

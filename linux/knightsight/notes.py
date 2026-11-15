@@ -23,14 +23,12 @@ PIN_BOX = 240
 MIN_DRAG = 6
 PIN_RADIUS = 12
 BADGE_RADIUS = 11
+# Each mark of a note gets a letter of its own.
+MAX_MARKS = 26
 
 
 @dataclass
-class Note:
-    number: int
-    kind: str
-    text: str
-    author: str
+class Mark:
     x: int
     y: int
     width: int = 0
@@ -41,6 +39,27 @@ class Note:
         return self.width == 0 and self.height == 0
 
 
+@dataclass
+class Note:
+    number: int
+    kind: str
+    text: str
+    author: str
+    marks: list
+
+    def label(self, index):
+        """The number for a note's only mark, with a letter in the order they were made for several."""
+        if len(self.marks) == 1:
+            return str(self.number)
+        return f"{self.number}{chr(ord('a') + index)}"
+
+
+def kind_line(note):
+    if len(note.marks) == 1:
+        return say.KINDS[note.kind]
+    return f"{say.KINDS[note.kind]}, {say.spots(len(note.marks))}"
+
+
 class Board:
     """The unsent notes. Their numbers keep counting across rounds."""
 
@@ -48,8 +67,8 @@ class Board:
         self.notes = []
         self.next = 1
 
-    def add(self, kind, text, author, mark):
-        note = Note(self.next, kind, text, author, *mark)
+    def add(self, kind, text, author, marks):
+        note = Note(self.next, kind, text, author, list(marks))
         self.next += 1
         self.notes.append(note)
         return note
@@ -105,38 +124,79 @@ def mark(fit, start, end, width, height):
         right, bottom = fit.to_view(width, height)
         if not (left <= start[0] <= right and top <= start[1] <= bottom):
             return None
-        return (*fit.to_share(*start, width, height), 0, 0)
+        return Mark(*fit.to_share(*start, width, height))
     (x0, y0), (x1, y1) = fit.to_share(*start, width, height), fit.to_share(*end, width, height)
     if x0 == x1 or y0 == y1:
         return None
-    return min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)
+    return Mark(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
+
+
+def _under(m, fit, x, y):
+    left, top = fit.to_view(m.x, m.y)
+    if m.pin:
+        return math.dist((x, y), (left, top)) <= PIN_RADIUS + 2
+    right, bottom = left + m.width * fit.k, top + m.height * fit.k
+    return (left - 3 <= x <= right + 3 and top - 3 <= y <= bottom + 3
+            or math.dist((x, y), (left, top)) <= BADGE_RADIUS + 2)
 
 
 def hit(notes, fit, x, y):
-    """The note whose mark lies under a point of the view, the newest on top."""
+    """The note and its mark under a point of the view, the newest on top, or None."""
     for note in reversed(notes):
-        left, top = fit.to_view(note.x, note.y)
-        if note.pin:
-            if math.dist((x, y), (left, top)) <= PIN_RADIUS + 2:
-                return note
-            continue
-        right, bottom = left + note.width * fit.k, top + note.height * fit.k
-        if left - 3 <= x <= right + 3 and top - 3 <= y <= bottom + 3:
-            return note
-        if math.dist((x, y), (left, top)) <= BADGE_RADIUS + 2:
-            return note
+        for m in reversed(note.marks):
+            if _under(m, fit, x, y):
+                return note, m
     return None
 
 
-def crop_box(note, width, height):
-    """What a note's crop shows: the box with a margin around it, or a square around a pin,
-    held to the share. None when the spot lies outside a share that has shrunk since."""
-    if note.pin:
-        half = PIN_BOX // 2
-        left, top, right, bottom = note.x - half, note.y - half, note.x + half, note.y + half
+def gesture(shown, editing, fit, start, end, width, height, shift):
+    """What a press at start and a release at end do on a share of width x height, as
+    ("edit", note), ("new", mark), ("add", mark) or ("drop", mark), or None for nothing.
+
+    shown are the notes on the share with editing, the one open in the editor, among them.
+    Shift adds marks to that note and takes them off again, down to the last.
+    """
+    moved = math.dist(start, end) >= MIN_DRAG
+    under = None if moved else hit(shown, fit, *start)
+    if shift and editing is not None:
+        if under is not None and under[0] is editing:
+            return ("drop", under[1]) if len(editing.marks) > 1 else None
+        spot = mark(fit, start, end, width, height)
+        if spot is None or len(editing.marks) >= MAX_MARKS:
+            return None
+        return "add", spot
+    if under is not None:
+        return None if under[0] is editing else ("edit", under[0])
+    spot = mark(fit, start, end, width, height)
+    return None if spot is None else ("new", spot)
+
+
+def beside(area, size, screen, gap):
+    """Where a window of size goes next to the share on a screen of that size: right of it,
+    else left of it, else over its right edge, and level with its top as far as the screen allows."""
+    width, height = size
+    if area.right + gap + width <= screen[0]:
+        x = area.right + gap
+    elif area.x - gap - width >= 0:
+        x = area.x - gap - width
     else:
-        left, top = note.x - MARGIN, note.y - MARGIN
-        right, bottom = note.x + note.width + MARGIN, note.y + note.height + MARGIN
+        x = screen[0] - gap - width
+    return x, max(0, min(area.y, screen[1] - height))
+
+
+def overlaps(a, b):
+    return a.x < b.right and b.x < a.right and a.y < b.bottom and b.y < a.bottom
+
+
+def crop_box(m, width, height):
+    """What a mark's crop shows: the box with a margin around it, or a square around a pin,
+    held to the share. None when the spot lies outside a share that has shrunk since."""
+    if m.pin:
+        half = PIN_BOX // 2
+        left, top, right, bottom = m.x - half, m.y - half, m.x + half, m.y + half
+    else:
+        left, top = m.x - MARGIN, m.y - MARGIN
+        right, bottom = m.x + m.width + MARGIN, m.y + m.height + MARGIN
     left, top = max(0, left), max(0, top)
     right, bottom = min(width, right), min(height, bottom)
     if right <= left or bottom <= top:
@@ -144,15 +204,14 @@ def crop_box(note, width, height):
     return left, top, right - left, bottom - top
 
 
-def entry(note, scale):
-    """A note as the protocol sends it, placed in the round's picture."""
-    out = {"number": note.number, "kind": note.kind, "text": note.text, "author": note.author,
-           "x": round(note.x * scale), "y": round(note.y * scale)}
-    if note.pin:
+def place(m, scale):
+    """A mark as the protocol sends it, placed in the round's picture."""
+    out = {"x": round(m.x * scale), "y": round(m.y * scale)}
+    if m.pin:
         out["pin"] = True
     else:
-        out["width"] = round(note.width * scale)
-        out["height"] = round(note.height * scale)
+        out["width"] = round(m.width * scale)
+        out["height"] = round(m.height * scale)
     return out
 
 
@@ -162,15 +221,19 @@ def sent_now():
 
 def assemble(title, width, height, notes, picture, crop, sent):
     """The fields of a round from a share of width x height. picture is the marked frame as
-    PNG base64, crop(note, box) gives a note's crop the same way."""
+    PNG base64, crop(note, box) gives the crop around one of its marks the same way."""
     scale = protocol.scale(width, height)
     entries = []
     for note in notes:
-        e = entry(note, scale)
-        box = crop_box(note, width, height)
-        if box:
-            e["image"] = crop(note, box)
-        entries.append(e)
+        spots = []
+        for i, m in enumerate(note.marks):
+            spot = {"label": note.label(i), **place(m, scale)}
+            box = crop_box(m, width, height)
+            if box:
+                spot["image"] = crop(note, box)
+            spots.append(spot)
+        entries.append({"number": note.number, "kind": note.kind, "text": note.text, "author": note.author,
+                        "marks": spots})
     pw, ph = protocol.picture_size(width, height)
     return {"sent": sent, "title": title, "width": pw, "height": ph, "image": picture, "notes": entries}
 
@@ -234,10 +297,11 @@ h1 {{ font-size: 22px; font-weight: 600; margin: 0 0 4px; }}
 img {{ display: block; max-width: 100%; height: auto; border-radius: 6px; }}
 .card {{ background: var(--surface); border-radius: 10px; padding: 16px; margin-top: 16px; }}
 .note {{ display: grid; grid-template-columns: 28px 1fr; gap: 4px 12px; }}
-.badge {{ width: 24px; height: 24px; border-radius: 50%; color: {ink}; font-size: 12px; font-weight: 600;
-  display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #fff; }}
+.badge {{ min-width: 24px; height: 24px; padding: 0 6px; box-sizing: border-box; border-radius: 12px; color: {ink};
+  font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px #fff; }}
 .note p {{ margin: 0; white-space: pre-wrap; }}
-.note img {{ grid-column: 2; margin-top: 8px; }}
+.crop {{ grid-column: 2; margin: 8px 0 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }}
 </style>
 </head>
 <body>
@@ -254,7 +318,10 @@ img {{ display: block; max-width: 100%; height: auto; border-radius: 6px; }}
 NOTE = """<div class="card note">
 <div class="badge" style="background: {colour}">{number}</div>
 <div><div class="muted">{kind}{author}</div><p>{text}</p></div>
-{crop}</div>"""
+{crops}</div>"""
+
+CROP = """<figure class="crop"><div class="badge" style="background: {colour}">{label}</div>
+<img src="data:image/png;base64,{image}" alt="{label}"></figure>"""
 
 
 def _web(colour):
@@ -266,10 +333,11 @@ def page(fields, number):
     parts = []
     for n in fields["notes"]:
         author = " &middot; " + html.escape(say.from_author(n["author"])) if n["author"] else ""
-        crop = f'<img src="data:image/png;base64,{n["image"]}" alt="">' if "image" in n else ""
-        parts.append(NOTE.format(colour=_web(KIND_COLOURS[n["kind"]]), number=n["number"],
-                                 kind=html.escape(say.KINDS[n["kind"]]), author=author, text=html.escape(n["text"]),
-                                 crop=crop))
+        colour = _web(KIND_COLOURS[n["kind"]])
+        crops = "\n".join(CROP.format(colour=colour, label=m["label"], image=m["image"])
+                          for m in n["marks"] if "image" in m)
+        parts.append(NOTE.format(colour=colour, number=n["number"], kind=html.escape(say.KINDS[n["kind"]]),
+                                 author=author, text=html.escape(n["text"]), crops=crops))
     sent = fields["sent"].replace("T", " ").replace("Z", " UTC")
     return PAGE.format(lang="de" if say.GERMAN else "en", heading=html.escape(say.file_heading(fields["title"])),
                        round=html.escape(say.round_label(number)), sent=sent, image=fields["image"],

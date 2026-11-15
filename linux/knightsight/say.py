@@ -59,7 +59,7 @@ NO_PICTURE = pick(
     "KnightSight kann gerade kein Bild der Freigabe machen.")
 
 PINBOARD = pick("Pinboard", "Pinnwand")
-PINBOARD_TIP = pick("Pinboard (Ctrl+Alt+Shift+P)", "Pinnwand (Strg+Alt+Umschalt+P)")
+PINBOARD_TIP = pick("Pinboard (Ctrl+Shift+A)", "Pinnwand (Strg+Umschalt+A)")
 PINBOARD_ON = pick("Pinboard on. Drag a box or click to set a pin.",
                    "Pinnwand an. Markier eine Stelle oder setz eine Nadel.")
 FETCHED = pick("Your assistant has fetched your notes.", "Dein Assistent hat deine Notizen abgeholt.")
@@ -68,6 +68,7 @@ NEW_NOTE = pick("New note", "Neue Notiz")
 NOTE_PLACEHOLDER = pick("What should your assistant know about this spot?",
                         "Was soll dein Assistent zu dieser Stelle wissen?")
 AUTHOR_PLACEHOLDER = pick("Your name", "Dein Name")
+MORE_SPOTS = pick("Hold Shift to add more spots to this note.", "Mit Umschalt markierst du weitere Stellen dazu.")
 SAVE = pick("Save", "Speichern")
 DELETE = pick("Delete", "Löschen")
 EMPTY_BOARD = pick("Drag a box around a spot or click to set a pin.",
@@ -87,6 +88,10 @@ def sent(count):
                     "1 Notiz gesendet. Dein Assistent kann sie abholen.")
     return pick(f"Sent {count} notes. Your assistant can fetch them now.",
                 f"{count} Notizen gesendet. Dein Assistent kann sie abholen.")
+
+
+def spots(count):
+    return pick(f"{count} spots", f"{count} Stellen")
 
 
 def note_title(number):
@@ -117,9 +122,9 @@ _ENDS = pick(
     "Strg+Alt+Umschalt+X beendet die Freigabe sofort,\nSchließen beendet sie auch.")
 
 _PINBOARD = pick(
-    "Ctrl+Alt+Shift+P opens the pinboard while you share.\nMark spots, write a note to each and click Done,\n"
+    "Ctrl+Shift+A opens the pinboard while you share.\nMark spots, write a note to them and click Done,\n"
     "then your assistant can fetch them.",
-    "Strg+Alt+Umschalt+P öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib zu jeder eine Notiz und\n"
+    "Strg+Umschalt+A öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib eine Notiz dazu und\n"
     "klick auf Fertig. Dann kann dein Assistent sie abholen.")
 
 HELP_X11 = pick(

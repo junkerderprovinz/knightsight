@@ -13,15 +13,20 @@ InputOutput = 1
 PropModeReplace = 0
 IconicState = 3
 ClientMessage = 33
-KeyPress, KeyRelease = 2, 3
+KeyPress, KeyRelease, ButtonPress, ButtonRelease, MotionNotify, LeaveNotify, Expose = 2, 3, 4, 5, 6, 8, 12
+IsViewable = 2
 Button1Mask = 1 << 8
 ControlMask, ShiftMask, LockMask, Mod1Mask, Mod2Mask = 1 << 2, 1 << 0, 1 << 1, 1 << 3, 1 << 4
 GrabModeAsync = 1
+ButtonPressMask, ButtonReleaseMask, LeaveWindowMask, PointerMotionMask = 1 << 2, 1 << 3, 1 << 5, 1 << 6
+ExposureMask = 1 << 15
 SubstructureNotifyMask = 1 << 19
 SubstructureRedirectMask = 1 << 20
-CWBackPixel, CWBorderPixel, CWOverrideRedirect, CWColormap = 1 << 1, 1 << 3, 1 << 9, 1 << 13
+CWBackPixel, CWBorderPixel, CWOverrideRedirect, CWEventMask, CWColormap, CWCursor = (
+    1 << 1, 1 << 3, 1 << 9, 1 << 11, 1 << 13, 1 << 14)
 CWSibling, CWStackMode = 1 << 5, 1 << 6
-Above = 0
+Above, Below = 0, 1
+XC_crosshair, XC_hand2 = 34, 60
 ShapeBounding, ShapeInput = 0, 2
 ShapeSet = 0
 CompositeRedirectAutomatic = 0
@@ -86,8 +91,21 @@ class XKeyEvent(Structure):
                 ("y_root", c_int), ("state", c_uint), ("keycode", c_uint), ("same_screen", Bool)]
 
 
+class XButtonEvent(Structure):
+    _fields_ = [("type", c_int), ("serial", c_ulong), ("send_event", Bool), ("display", c_void_p), ("window", XID),
+                ("root", XID), ("subwindow", XID), ("time", c_ulong), ("x", c_int), ("y", c_int), ("x_root", c_int),
+                ("y_root", c_int), ("state", c_uint), ("button", c_uint), ("same_screen", Bool)]
+
+
+class XMotionEvent(Structure):
+    _fields_ = [("type", c_int), ("serial", c_ulong), ("send_event", Bool), ("display", c_void_p), ("window", XID),
+                ("root", XID), ("subwindow", XID), ("time", c_ulong), ("x", c_int), ("y", c_int), ("x_root", c_int),
+                ("y_root", c_int), ("state", c_uint), ("is_hint", ctypes.c_char), ("same_screen", Bool)]
+
+
 class XEvent(Union):
-    _fields_ = [("type", c_int), ("xclient", XClientMessageEvent), ("xkey", XKeyEvent), ("pad", c_long * 24)]
+    _fields_ = [("type", c_int), ("xclient", XClientMessageEvent), ("xkey", XKeyEvent), ("xbutton", XButtonEvent),
+                ("xmotion", XMotionEvent), ("pad", c_long * 24)]
 
 
 class XScreenSaverInfo(Structure):
@@ -161,11 +179,13 @@ if x11:
     XCreateWindow = _bind(x11, "XCreateWindow", W, D, W, c_int, c_int, c_uint, c_uint, c_uint, c_int, c_uint,
                           c_void_p, c_ulong, POINTER(XSetWindowAttributes))
     XCreateColormap = _bind(x11, "XCreateColormap", XID, D, W, c_void_p, c_int)
+    XFreeColormap = _bind(x11, "XFreeColormap", c_int, D, XID)
     XMatchVisualInfo = _bind(x11, "XMatchVisualInfo", c_int, D, c_int, c_int, c_int, POINTER(XVisualInfo))
     XDestroyWindow = _bind(x11, "XDestroyWindow", c_int, D, W)
     XMapRaised = _bind(x11, "XMapRaised", c_int, D, W)
     XUnmapWindow = _bind(x11, "XUnmapWindow", c_int, D, W)
     XMoveResizeWindow = _bind(x11, "XMoveResizeWindow", c_int, D, W, c_int, c_int, c_uint, c_uint)
+    XMoveWindow = _bind(x11, "XMoveWindow", c_int, D, W, c_int, c_int)
     XSetWindowBackground = _bind(x11, "XSetWindowBackground", c_int, D, W, c_ulong)
     XClearWindow = _bind(x11, "XClearWindow", c_int, D, W)
     XConfigureWindow = _bind(x11, "XConfigureWindow", c_int, D, W, c_uint, POINTER(XWindowChanges))
@@ -180,6 +200,10 @@ if x11:
     XGetKeyboardMapping = _bind(x11, "XGetKeyboardMapping", POINTER(c_ulong), D, c_ubyte, c_int, POINTER(c_int))
     XChangeKeyboardMapping = _bind(x11, "XChangeKeyboardMapping", c_int, D, c_int, c_int, POINTER(c_ulong), c_int)
     XGrabKey = _bind(x11, "XGrabKey", c_int, D, c_int, c_uint, W, Bool, c_int, c_int)
+    XUngrabKey = _bind(x11, "XUngrabKey", c_int, D, c_int, c_uint, W)
+    XCreateFontCursor = _bind(x11, "XCreateFontCursor", XID, D, c_uint)
+    XDefineCursor = _bind(x11, "XDefineCursor", c_int, D, W, XID)
+    XFreeCursor = _bind(x11, "XFreeCursor", c_int, D, XID)
     XPending = _bind(x11, "XPending", c_int, D)
     XNextEvent = _bind(x11, "XNextEvent", c_int, D, POINTER(XEvent))
     XGetSelectionOwner = _bind(x11, "XGetSelectionOwner", W, D, XID)

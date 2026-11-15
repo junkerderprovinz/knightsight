@@ -7,7 +7,6 @@ import traceback
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 
 from . import glyphs, logo, notes, say, theme, widgets
-from .pinboard import Pinboard
 from .protocol import Refused
 from .widgets import bar_button, button
 
@@ -93,7 +92,7 @@ class Panel(Gtk.ApplicationWindow):
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)
         keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control><Alt><Shift>x"),
                                        action=Gtk.CallbackAction.new(lambda *_: self.stop() or True)))
-        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control><Alt><Shift>p"),
+        keys.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control><Shift>a"),
                                        action=Gtk.CallbackAction.new(lambda *_: self.toggle_pinboard() or True)))
         self.add_controller(keys)
         self.connect("notify::is-active", lambda *_: self.focus_moved())
@@ -192,6 +191,7 @@ class Panel(Gtk.ApplicationWindow):
         self.chosen = None
         self.active = False
         self.close_pinboard()
+        self.desk.unbind_hotkey()
         self.desk.release()
         self.show_state()
 
@@ -206,6 +206,7 @@ class Panel(Gtk.ApplicationWindow):
     def stop(self):
         self.active = False
         self.close_pinboard()
+        self.desk.unbind_hotkey()
         self.show_state()
 
     def hotkey(self, name):
@@ -229,7 +230,7 @@ class Panel(Gtk.ApplicationWindow):
             self.show_state()
             return
         self.board_notice = None
-        self.pinboard = Pinboard(self, shot, self.pinboard_closed)
+        self.pinboard = self.desk.pinboard(shot, self.pinboard_closed)
         self.pinboard.present()
         self.show_state()
 

@@ -13,6 +13,7 @@ from gi.repository import Gdk, Gio, GLib
 
 from . import picture, protocol, say
 from .picker import RegionPicker
+from .pinboard import Pinboard
 from .protocol import Rect, Refused
 from .stream import Frames
 
@@ -114,7 +115,10 @@ class Desk:
         self.requests = Requests(self.bus)
         self.current = None
         self.closed_watch = None
+        # The session holding the shortcuts and the watch on them, while a share runs.
         self.shortcuts = None
+        self.asking = False
+        self.sharing = False
 
     def _property(self, interface, name):
         try:
@@ -248,26 +252,47 @@ class Desk:
         return None
 
     def bind_hotkey(self, pressed):
-        """Asks the desktop for Ctrl+Alt+Shift+X and P once, the first time something is shared.
-        pressed gets the name of the one pressed."""
-        if self.shortcuts or self._property(SHORTCUTS, "version") is None:
+        """Asks the desktop for Ctrl+Alt+Shift+X and Ctrl+Shift+A while something is shared.
+        pressed gets the name of the one pressed. Other programs use Ctrl+Shift+A too, and the
+        portal frees a shortcut only with its session, so the session ends with the share."""
+        self.sharing = True
+        if self.shortcuts or self.asking or self._property(SHORTCUTS, "version") is None:
             return
-        self.shortcuts = "asking"
+        self.asking = True
 
-        def shortcut(description, key):
-            return {"description": GLib.Variant("s", description),
-                    "preferred_trigger": GLib.Variant("s", "CTRL+ALT+SHIFT+" + key)}
+        def shortcut(description, trigger):
+            return {"description": GLib.Variant("s", description), "preferred_trigger": GLib.Variant("s", trigger)}
 
         def steps():
             r = yield SHORTCUTS, "CreateSession", "(a{sv})", (), {"session_handle_token": GLib.Variant("s", self.requests.token())}
             session = r["session_handle"]
-            self.shortcuts = session
-            self.bus.signal_subscribe(BUS, SHORTCUTS, "Activated", PATH, session, Gio.DBusSignalFlags.NONE,
-                                      lambda _bus, _sender, _path, _iface, _name, params: pressed(params.unpack()[1]))
-            shortcuts = [("stop", shortcut(say.STOP_SHARE, "x")), ("pinboard", shortcut(say.PINBOARD, "p"))]
+            self.asking = False
+            if not self.sharing:
+                self._close(session)
+                return
+            watch = self.bus.signal_subscribe(
+                BUS, SHORTCUTS, "Activated", PATH, session, Gio.DBusSignalFlags.NONE,
+                lambda _bus, _sender, _path, _iface, _name, params: pressed(params.unpack()[1]))
+            self.shortcuts = (session, watch)
+            shortcuts = [("stop", shortcut(say.STOP_SHARE, "CTRL+ALT+SHIFT+X")),
+                         ("pinboard", shortcut(say.PINBOARD, "CTRL+SHIFT+A"))]
             yield SHORTCUTS, "BindShortcuts", "(oa(sa{sv})s)", (session, shortcuts, ""), {}
 
-        self.requests.run(steps(), lambda *_: None)
+        def failed(*_):
+            self.asking = False
+
+        self.requests.run(steps(), failed)
+
+    def unbind_hotkey(self):
+        self.sharing = False
+        if self.shortcuts:
+            session, watch = self.shortcuts
+            self.shortcuts = None
+            self.bus.signal_unsubscribe(watch)
+            self._close(session)
+
+    def pinboard(self, shot, closed):
+        return Pinboard(self.panel, shot, closed)
 
     def hotkey_pressed(self):
         return None

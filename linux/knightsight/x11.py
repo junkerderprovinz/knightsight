@@ -1,5 +1,5 @@
 """The desk on an X11 session: Composite for pictures of covered windows, XTEST for input,
-and frame and badge as click-through windows of our own around the share."""
+frame and badge as click-through windows of our own around the share, and the pinboard on it."""
 
 import ctypes
 import math
@@ -14,11 +14,17 @@ from gi.repository import Gdk, GLib, Pango, PangoCairo
 
 from . import picture, protocol, say, theme, xlib
 from .glyphs import rounded
+from .overlay import Overlay
 from .picker import RegionPicker
+from .pinboard import Pinboard
 from .protocol import Rect, Refused
 
 SKIPPED_TYPES = {"_NET_WM_WINDOW_TYPE_DESKTOP", "_NET_WM_WINDOW_TYPE_DOCK"}
 MODIFIER_KEYS = {"ctrl": "Control_L", "alt": "Alt_L", "shift": "Shift_L"}
+STOP_KEY = (b"x", xlib.ControlMask | xlib.Mod1Mask | xlib.ShiftMask)
+PINBOARD_KEY = (b"a", xlib.ControlMask | xlib.ShiftMask)
+# Caps Lock and Num Lock count as modifiers too, so each of their states needs its own grab.
+LOCKS = (0, xlib.LockMask, xlib.Mod2Mask, xlib.LockMask | xlib.Mod2Mask)
 
 
 class Share:
@@ -126,27 +132,29 @@ class Desk:
         self.lent = 0
         self.scratch = None
         self.frame = Frame(self.ui)
-        self.hotkeys = self._grab_hotkeys()
+        # The open pinboard while it lies on the share.
+        self.board = None
+        self.hotkeys = {}
         self.released = {}
+        self._grab(STOP_KEY, "stop")
+        self.pinboard_key = 0
 
     def close(self):
         self.frame.hide()
 
-    def _grab_hotkeys(self):
-        """Ctrl+Alt+Shift+X and P, by their keycodes."""
-        mods = xlib.ControlMask | xlib.Mod1Mask | xlib.ShiftMask
-        codes = {}
-        for key, name in ((b"x", "stop"), (b"p", "pinboard")):
-            code = xlib.XKeysymToKeycode(self.ui.d, xlib.XStringToKeysym(key))
-            # Caps Lock and Num Lock count as modifiers too, so each of their states needs its own grab.
-            for extra in (0, xlib.LockMask, xlib.Mod2Mask, xlib.LockMask | xlib.Mod2Mask):
-                xlib.XGrabKey(self.ui.d, code, mods | extra, self.ui.root, True, xlib.GrabModeAsync, xlib.GrabModeAsync)
-            codes[code] = name
+    def _grab(self, key, name):
+        """Takes a hotkey for the whole screen and gives back its keycode."""
+        keysym, mods = key
+        code = xlib.XKeysymToKeycode(self.ui.d, xlib.XStringToKeysym(keysym))
+        for extra in LOCKS:
+            xlib.XGrabKey(self.ui.d, code, mods | extra, self.ui.root, True, xlib.GrabModeAsync, xlib.GrabModeAsync)
         self.ui.failed()
-        return codes
+        self.hotkeys[code] = name
+        return code
 
     def hotkey_pressed(self):
-        """The name of the hotkey pressed since the last call, or None."""
+        """The name of the hotkey pressed since the last call, or None. The pinboard's veil gets
+        its events on the way."""
         pressed = None
         event = xlib.XEvent()
         while xlib.XPending(self.ui.d):
@@ -154,14 +162,42 @@ class Desk:
             key = event.xkey
             if event.type == xlib.KeyRelease:
                 self.released[key.keycode] = key.time
-            # A held key repeats as a release and a press at the same moment, which would
-            # open and close the pinboard over and over.
-            elif event.type == xlib.KeyPress and key.time - self.released.get(key.keycode, 0) > 1:
-                pressed = self.hotkeys.get(key.keycode, pressed)
+            elif event.type == xlib.KeyPress:
+                # A held key repeats as a release and a press at the same moment, which would
+                # open and close the pinboard over and over.
+                if key.time - self.released.get(key.keycode, 0) > 1:
+                    pressed = self.hotkeys.get(key.keycode, pressed)
+            elif self.board is not None:
+                self.board.handle(event)
         return pressed
 
     def bind_hotkey(self, _pressed):
-        pass
+        """Other programs use Ctrl+Shift+A too, so the pinboard holds it only while something
+        is shared."""
+        if not self.pinboard_key:
+            self.pinboard_key = self._grab(PINBOARD_KEY, "pinboard")
+
+    def unbind_hotkey(self):
+        if not self.pinboard_key:
+            return
+        for extra in LOCKS:
+            xlib.XUngrabKey(self.ui.d, self.pinboard_key, PINBOARD_KEY[1] | extra, self.ui.root)
+        self.ui.failed()
+        del self.hotkeys[self.pinboard_key]
+        self.pinboard_key = 0
+
+    def pinboard(self, shot, closed):
+        """The pinboard right on the share where a compositor can make its veil see-through,
+        else the window with a picture of the share."""
+        if not self.frame.argb:
+            return Pinboard(self.panel, shot, closed)
+
+        def gone():
+            self.board = None
+            closed()
+
+        self.board = Overlay(self.panel, shot, gone, self.uiw, self.frame.visual)
+        return self.board
 
     def pick_window(self, done):
         """Waits for the person to click a window, the way the Windows panel polls the mouse."""
@@ -250,7 +286,7 @@ class Desk:
             reply = picture.encode(self._window_shot(share.window, self.workw))
             reply["title"] = self.workw.title(share.window)
             return reply
-        with self._badge_away(share.region):
+        with self._out_of_shot(share.region):
             shot = self._region_shot(share.region, self.work)
         reply = picture.encode(shot)
         reply["title"] = share.title
@@ -274,20 +310,32 @@ class Desk:
         return picture.surface(data, stride, r.width, r.height, False)
 
     @contextmanager
-    def _badge_away(self, r):
-        """A region is copied off the screen, so a badge sitting inside it steps away for the shot."""
-        if not self.frame.inside(r):
+    def _out_of_shot(self, r):
+        """A region is copied off the screen, so a badge sitting inside it and the pinboard over
+        it step away for the shot."""
+        board = self.board
+        if board is None and not self.frame.inside(r):
             yield
             return
         self.panel.badge_held = True
         hidden = threading.Event()
-        GLib.idle_add(lambda: self.frame.hide_badge() or hidden.set())
+        went = []
+
+        def away():
+            self.frame.hide_badge()
+            if board is not None:
+                went.append(board.keep_out(r))
+            hidden.set()
+
+        GLib.idle_add(away)
         hidden.wait(1)
         time.sleep(0.04)
         try:
             yield
         finally:
             self.panel.badge_held = False
+            if went:
+                GLib.idle_add(board.bring_back, went[0])
 
     @staticmethod
     def _window_shot(w, wins):
@@ -501,10 +549,15 @@ class Desk:
         time.sleep(0.01)
 
     def show(self, share, area, color, width, badge):
-        self.frame.show(area, color, width, 0 if share.region else self.uiw.top(share.window), badge)
+        above = 0 if share.region else self.uiw.top(share.window)
+        self.frame.show(area, color, width, above, badge)
+        if self.board is not None:
+            self.board.follow(area, above)
 
     def hide(self):
         self.frame.hide()
+        if self.board is not None:
+            self.board.veil.hide()
 
 
 def _pixel(c):
