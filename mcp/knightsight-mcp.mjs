@@ -87,11 +87,12 @@ const tools = [
     },
   },
   {
-    name: 'notes',
+    name: 'pinboard',
     description:
       'Reads the notes the person pinned onto the share in KnightSight\'s pinboard and sent with Done: each with its kind ' +
-      '(bug, wish or question), text, author and place, a picture of the share with numbered markers and a picture of each ' +
-      'marked spot. Places use the coordinates of the picture, which match look and click as long as the share keeps its size. ' +
+      '(bug, wish or question), text, author and the places of its marks (one or more boxes or pins, labelled 3 or 3a, 3b), ' +
+      'a picture of the share with every mark labelled and a picture of each marked spot. Places use the coordinates of the ' +
+      'picture, which match look and click as long as the share keeps its size. ' +
       'Set wait to wait up to that many seconds for notes not read yet, for example after asking the person to pin some.',
     inputSchema: {
       type: 'object',
@@ -255,26 +256,30 @@ async function steps(args) {
 }
 
 const HOW_TO_PIN =
-  'While sharing, the person opens the pinboard with Ctrl+Alt+Shift+P (Ctrl+Option+Shift+P on a Mac) or the pin button ' +
+  'While sharing, the person opens the pinboard with Ctrl+Shift+A (Cmd+Shift+A on a Mac) or the pin button ' +
   'in the KnightSight window, pins notes onto the share and clicks Done.';
 const KINDS = { bug: 'Bug', wish: 'Wish', question: 'Question' };
 
-function place(note) {
+function place(mark) {
+  const at = mark.pin ? `a pin at ${mark.x}, ${mark.y}` : `${mark.x}, ${mark.y}, ${mark.width} x ${mark.height}`;
+  return `   ${mark.label}: ${at}`;
+}
+
+function describe(note) {
   const by = note.author ? `, from ${note.author}` : '';
-  const at = note.pin ? `, a pin at ${note.x}, ${note.y}` : ` at ${note.x}, ${note.y}, ${note.width} x ${note.height}`;
-  return `${note.number}. ${KINDS[note.kind] ?? note.kind}${at}${by}: ${note.text}`;
+  return [`${note.number}. ${KINDS[note.kind] ?? note.kind}${by}: ${note.text}`, ...note.marks.map(place)].join('\n');
 }
 
 function round(reply) {
   const head = `Round ${reply.round}, sent ${reply.sent} on "${reply.title}". The picture is ${reply.width} x ${reply.height}.`;
   return {
     content: [
-      { type: 'text', text: [head, ...reply.notes.map(place)].join('\n') },
+      { type: 'text', text: [head, ...reply.notes.map(describe)].join('\n') },
       { type: 'image', data: reply.image, mimeType: 'image/png' },
-      ...reply.notes.flatMap((note) => [
-        { type: 'text', text: `Note ${note.number}, the marked spot:` },
-        { type: 'image', data: note.image, mimeType: 'image/png' },
-      ]),
+      ...reply.notes.flatMap((note) => note.marks.flatMap((mark) => [
+        { type: 'text', text: `Spot ${mark.label}:` },
+        { type: 'image', data: mark.image, mimeType: 'image/png' },
+      ])),
     ],
   };
 }
@@ -302,7 +307,7 @@ async function notes(args, progress) {
 
 async function callTool(name, args, progress) {
   if (name === 'steps') return steps(args);
-  if (name === 'notes') return notes(args, progress);
+  if (name === 'pinboard') return notes(args, progress);
   const { look, wait, ...fields } = args;
   const reply = await relay({ ...fields, cmd: name });
   if (!reply.ok) return text([reply.error], true);
@@ -325,7 +330,7 @@ input.on('line', async (line) => {
         return answer({
           protocolVersion: msg.params?.protocolVersion ?? '2025-06-18',
           capabilities: { tools: {} },
-          serverInfo: { name: 'knightsight', version: '1.0.0' },
+          serverInfo: { name: 'knightsight', version: '1.1.0' },
         });
       case 'ping':
         return answer({});
