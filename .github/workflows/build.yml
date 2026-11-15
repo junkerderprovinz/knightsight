@@ -20,8 +20,14 @@ jobs:
         shell: powershell
         run: .\build.ps1
 
-      - name: Check the MCP server
-        run: node --check mcp/knightsight-mcp.mjs
+      - name: Test the panel
+        shell: powershell
+        run: .\build.ps1 -Test
+
+      - name: Check and test the MCP server
+        run: |
+          node --check mcp/knightsight-mcp.mjs
+          node --test mcp/knightsight-mcp.test.mjs
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:

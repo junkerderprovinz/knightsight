@@ -44,8 +44,10 @@ jobs:
       - name: Unit tests
         run: /usr/bin/python3 -m unittest discover -s linux/tests -v
 
-      - name: Check the MCP server
-        run: node --check mcp/knightsight-mcp.mjs
+      - name: Check and test the MCP server
+        run: |
+          node --check mcp/knightsight-mcp.mjs
+          node --test mcp/knightsight-mcp.test.mjs
 
       - name: Smoke test on X11
         env:

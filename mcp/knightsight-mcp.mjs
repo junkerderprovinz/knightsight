@@ -86,6 +86,18 @@ const tools = [
       required: ['steps'],
     },
   },
+  {
+    name: 'notes',
+    description:
+      'Reads the notes the person pinned onto the share in KnightSight\'s pinboard and sent with Done: each with its kind ' +
+      '(bug, wish or question), text, author and place, a picture of the share with numbered markers and a picture of each ' +
+      'marked spot. Places use the coordinates of the picture, which match look and click as long as the share keeps its size. ' +
+      'Set wait to wait up to that many seconds for notes not read yet, for example after asking the person to pin some.',
+    inputSchema: {
+      type: 'object',
+      properties: { wait: { type: 'number', description: 'Seconds to wait for notes not read yet, up to 3600' } },
+    },
+  },
 ];
 
 const NOT_RUNNING = 'KnightSight is not running. Start KnightSight, choose a window or a region and start sharing.';
@@ -242,8 +254,55 @@ async function steps(args) {
   return args.look ? lookAfter(args.wait, done) : text(done);
 }
 
-async function callTool(name, args) {
+const HOW_TO_PIN =
+  'While sharing, the person opens the pinboard with Ctrl+Alt+Shift+P (Ctrl+Option+Shift+P on a Mac) or the pin button ' +
+  'in the KnightSight window, pins notes onto the share and clicks Done.';
+const KINDS = { bug: 'Bug', wish: 'Wish', question: 'Question' };
+
+function place(note) {
+  const by = note.author ? `, from ${note.author}` : '';
+  const at = note.pin ? `, a pin at ${note.x}, ${note.y}` : ` at ${note.x}, ${note.y}, ${note.width} x ${note.height}`;
+  return `${note.number}. ${KINDS[note.kind] ?? note.kind}${at}${by}: ${note.text}`;
+}
+
+function round(reply) {
+  const head = `Round ${reply.round}, sent ${reply.sent} on "${reply.title}". The picture is ${reply.width} x ${reply.height}.`;
+  return {
+    content: [
+      { type: 'text', text: [head, ...reply.notes.map(place)].join('\n') },
+      { type: 'image', data: reply.image, mimeType: 'image/png' },
+      ...reply.notes.flatMap((note) => [
+        { type: 'text', text: `Note ${note.number}, the marked spot:` },
+        { type: 'image', data: note.image, mimeType: 'image/png' },
+      ]),
+    ],
+  };
+}
+
+// The panel answers a round it already handed out with its number alone, so waiting is
+// asking again until one comes with notes.
+async function notes(args, progress) {
+  const wait = Math.min(Math.max(Number(args.wait) || 0, 0), 3600);
+  if (!wait) {
+    const reply = await relay({ cmd: 'notes' });
+    if (!reply.ok) return text([reply.error], true);
+    return reply.notes ? round(reply) : text([`No notes have been sent yet. ${HOW_TO_PIN}`]);
+  }
+  const started = Date.now();
+  const until = started + wait * 1000;
+  for (;;) {
+    const reply = await relay({ cmd: 'notes', unread: true });
+    if (!reply.ok) return text([reply.error], true);
+    if (reply.notes) return round(reply);
+    if (Date.now() >= until) return text([`No new notes within ${wait} ${wait === 1 ? 'second' : 'seconds'}. ${HOW_TO_PIN}`]);
+    progress?.(Math.round((Date.now() - started) / 100) / 10, wait);
+    await sleep(Math.min(500, until - Date.now()));
+  }
+}
+
+async function callTool(name, args, progress) {
   if (name === 'steps') return steps(args);
+  if (name === 'notes') return notes(args, progress);
   const { look, wait, ...fields } = args;
   const reply = await relay({ ...fields, cmd: name });
   if (!reply.ok) return text([reply.error], true);
@@ -272,8 +331,13 @@ input.on('line', async (line) => {
         return answer({});
       case 'tools/list':
         return answer({ tools });
-      case 'tools/call':
-        return answer(await callTool(msg.params.name, msg.params.arguments ?? {}));
+      case 'tools/call': {
+        // Clients that sent a token keep a long wait alive on these.
+        const token = msg.params._meta?.progressToken;
+        const progress = token === undefined ? null
+          : (done, total) => send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: done, total } });
+        return answer(await callTool(msg.params.name, msg.params.arguments ?? {}, progress));
+      }
       default:
         return send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: `Unknown method ${msg.method}` } });
     }
