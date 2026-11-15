@@ -4,7 +4,9 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
-## Unreleased
+## v1.1.2 (2026-11-15)
+
+The pinboard has a button of its own.
 
 ## 🎨 Design
 
