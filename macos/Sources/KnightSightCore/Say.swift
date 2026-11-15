@@ -37,12 +37,13 @@ public struct Say {
     public var waiting: String { pick("Waiting for a quiet moment", "Warte auf einen ruhigen Moment") }
 
     public var pinboard: String { pick("Pinboard", "Pinnwand") }
-    public var pinboardTip: String { pick("Pinboard (Ctrl+Option+Shift+P)", "Pinnwand (Ctrl+Alt+Umschalt+P)") }
+    public var pinboardTip: String { pick("Pinboard (Cmd+Shift+A)", "Pinnwand (Cmd+Umschalt+A)") }
     public var pinboardOn: String { pick("Pinboard on. Drag a box or click to set a pin.", "Pinnwand an. Markier eine Stelle oder setz eine Nadel.") }
     public var fetched: String { pick("Your assistant has fetched your notes.", "Dein Assistent hat deine Notizen abgeholt.") }
     public var newNote: String { pick("New note", "Neue Notiz") }
     public var notePlaceholder: String { pick("What should your assistant know about this spot?", "Was soll dein Assistent zu dieser Stelle wissen?") }
     public var authorPlaceholder: String { pick("Your name", "Dein Name") }
+    public var moreSpots: String { pick("Hold Shift to add more spots to this note.", "Mit Umschalt markierst du weitere Stellen dazu.") }
     public var save: String { pick("Save", "Speichern") }
     public var delete: String { pick("Delete", "Löschen") }
     public var emptyBoard: String { pick("Drag a box around a spot or click to set a pin.", "Zieh ein Rechteck um eine Stelle oder klick für eine Nadel.") }
@@ -65,6 +66,15 @@ public struct Say {
         case .wish: return pick("Wish", "Wunsch")
         case .question: return pick("Question", "Frage")
         }
+    }
+
+    public func spots(_ count: Int) -> String {
+        count == 1 ? pick("1 spot", "1 Stelle") : pick("\(count) spots", "\(count) Stellen")
+    }
+
+    /// The kind of a note, and how many spots it marks when there are several.
+    public func kindLine(_ note: Note) -> String {
+        note.marks.count == 1 ? kind(note.kind) : kind(note.kind) + ", " + spots(note.marks.count)
     }
 
     public func noteTitle(_ number: Int) -> String { pick("Note \(number)", "Notiz \(number)") }
@@ -99,7 +109,7 @@ public struct Say {
                 "comes to the front once mouse and keyboard rest for about a second.\nAfterwards your own window and pointer go back to where they were.\n" +
                 "A window that is minimized, hidden or on another desktop is out of reach.\n\n" +
                 "KnightSight needs Screen Recording and Accessibility, both\nunder System Settings, Privacy & Security.\n\n" +
-                "Ctrl+Option+Shift+P opens the pinboard while you share.\nMark spots, write a note to each and click Done,\nthen your assistant can fetch them.\n\n" +
+                "Cmd+Shift+A opens the pinboard while you share.\nMark spots, write a note to them and click Done,\nthen your assistant can fetch them.\n\n" +
                 "Ctrl+Option+Shift+X ends the share at once,\nand so does closing this window.",
             "Grauer Rahmen: gewählt, aber noch nicht freigegeben.\n" +
                 "Gelber Rahmen: freigegeben. Angeschaut, geklickt und getippt\nwird nur darin, und erst auf Anfrage.\n" +
@@ -108,7 +118,7 @@ public struct Say {
                 "Kürzel mit Cmd kommt das Fenster kurz nach vorn, sobald du gut eine\nSekunde lang nichts eingibst. Danach sind dein Fenster und dein\nMauszeiger wieder da, wo sie waren.\n" +
                 "Minimiert, ausgeblendet oder auf einem anderen Schreibtisch ist es\nnicht erreichbar.\n\n" +
                 "KnightSight braucht Bildschirmaufnahme und Bedienungshilfen, beides\nunter Systemeinstellungen, Datenschutz & Sicherheit.\n\n" +
-                "Ctrl+Alt+Umschalt+P öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib zu jeder eine Notiz und\nklick auf Fertig. Dann kann dein Assistent sie abholen.\n\n" +
+                "Cmd+Umschalt+A öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib eine Notiz dazu und\nklick auf Fertig. Dann kann dein Assistent sie abholen.\n\n" +
                 "Ctrl+Alt+Umschalt+X beendet die Freigabe sofort,\nSchließen beendet sie auch."
         )
     }

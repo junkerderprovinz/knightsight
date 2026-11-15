@@ -14,32 +14,73 @@ public enum NoteKind: String, CaseIterable, Encodable {
     }
 }
 
-/// A note on the pinboard. Its mark counts in points from the share's top left, and a pin is
-/// a mark of zero size.
+/// A note on the pinboard with one mark or more, in the order they were made. Marks count in
+/// points from the share's top left, and a pin is a mark of zero size.
 public struct Note: Equatable {
+    static let letters = Array("abcdefghijklmnopqrstuvwxyz")
+    public static let maxMarks = letters.count
+
     public let number: Int
     public var kind: NoteKind
     public var text: String
     public var author: String
-    public var mark: CGRect
+    public var marks: [CGRect]
 
-    public init(number: Int, kind: NoteKind, text: String, author: String, mark: CGRect) {
+    public init(number: Int, kind: NoteKind, text: String, author: String, marks: [CGRect]) {
         self.number = number
         self.kind = kind
         self.text = text
         self.author = author
-        self.mark = mark
+        self.marks = marks
     }
 
-    public var isPin: Bool { mark.size == .zero }
+    /// The number alone for a note with one mark, with a letter in mark order for several.
+    public func label(_ i: Int) -> String {
+        marks.count == 1 ? "\(number)" : "\(number)\(Note.letters[i])"
+    }
+
+    public var labels: [String] { marks.indices.map(label) }
 }
 
-/// What Done sends: the share as look pictures it with every mark drawn on it, and per note
-/// the place of its mark in that picture and a crop around it.
+/// A note as the editor holds it, which reaches the board on Save: the note it was opened
+/// from, nil for a new one, and its marks as they stand.
+public struct Draft: Equatable {
+    public let number: Int?
+    public private(set) var marks: [CGRect]
+
+    public init(number: Int?, marks: [CGRect]) {
+        self.number = number
+        self.marks = marks
+    }
+
+    /// Refused once every letter labels a mark.
+    @discardableResult
+    public mutating func add(_ mark: CGRect) -> Bool {
+        guard marks.count < Note.maxMarks else { return false }
+        marks.append(mark)
+        return true
+    }
+
+    /// Refused for the last mark, as a note needs one.
+    @discardableResult
+    public mutating func remove(at i: Int) -> Bool {
+        guard marks.count > 1 else { return false }
+        marks.remove(at: i)
+        return true
+    }
+}
+
+/// What Done sends: the share as look pictures it with every mark drawn on it, and per mark
+/// its place in that picture and a crop around it.
 public struct Round {
     public struct Entry {
         public let note: Note
-        /// The mark in the round's picture.
+        public let marks: [Mark]
+    }
+
+    public struct Mark {
+        public let label: String
+        /// In the round's picture.
         public let place: CGRect
         /// Nil when the mark lies outside the share.
         public let image: Data?
@@ -53,8 +94,9 @@ public struct Round {
     public let image: Data
     public let entries: [Entry]
 
-    /// Crop gets each note with the box its crop shows, in points from the share's top left.
-    public init(number: Int, sent: Date, title: String, share: Share, image: Data, notes: [Note], crop: (Note, CGRect) -> Data) {
+    /// Crop gets a note, the index of one of its marks and the box that mark's crop shows, in
+    /// points from the share's top left.
+    public init(number: Int, sent: Date, title: String, share: Share, image: Data, notes: [Note], crop: (Note, Int, CGRect) -> Data) {
         self.number = number
         self.sent = sent
         self.title = title
@@ -63,7 +105,10 @@ public struct Round {
         height = Int(size.height)
         self.image = image
         entries = notes.sorted { $0.number < $1.number }.map { note in
-            Entry(note: note, place: share.picture(note.mark), image: share.cropBox(for: note).map { crop(note, $0) })
+            Entry(note: note, marks: note.marks.indices.map { i in
+                let mark = note.marks[i]
+                return Mark(label: note.label(i), place: share.picture(mark), image: share.cropBox(for: mark).map { crop(note, i, $0) })
+            })
         }
     }
 }
@@ -77,18 +122,17 @@ extension Share {
         CGRect(x: r.minX * scale, y: r.minY * scale, width: r.width * scale, height: r.height * scale)
     }
 
-    /// The part of the share a note's crop shows, in points from its top left: the mark with
+    /// The part of the share a mark's crop shows, in points from its top left: the mark with
     /// a margin, or a box around a pin, cut to the share.
-    public func cropBox(for note: Note) -> CGRect? {
+    public func cropBox(for mark: CGRect) -> CGRect? {
         let bounds = CGRect(origin: .zero, size: area.size)
-        let m = note.mark
         let around: CGRect
-        if note.isPin {
-            guard bounds.contains(m.origin) else { return nil }
-            around = CGRect(x: m.minX - Share.pinCrop / 2, y: m.minY - Share.pinCrop / 2, width: Share.pinCrop, height: Share.pinCrop)
+        if mark.size == .zero {
+            guard bounds.contains(mark.origin) else { return nil }
+            around = CGRect(x: mark.minX - Share.pinCrop / 2, y: mark.minY - Share.pinCrop / 2, width: Share.pinCrop, height: Share.pinCrop)
         } else {
-            guard m.intersects(bounds) else { return nil }
-            around = m.insetBy(dx: -Share.cropMargin, dy: -Share.cropMargin)
+            guard mark.intersects(bounds) else { return nil }
+            around = mark.insetBy(dx: -Share.cropMargin, dy: -Share.cropMargin)
         }
         return around.intersection(bounds)
     }
@@ -122,21 +166,22 @@ public final class Board {
 
     /// Numbers count on for as long as the app runs, across rounds.
     @discardableResult
-    public func add(_ kind: NoteKind, _ text: String, author: String, mark: CGRect) -> Note {
+    public func add(_ kind: NoteKind, _ text: String, author: String, marks: [CGRect]) -> Note {
         locked {
             lastNumber += 1
-            let note = Note(number: lastNumber, kind: kind, text: text, author: author, mark: mark)
+            let note = Note(number: lastNumber, kind: kind, text: text, author: author, marks: marks)
             stored.append(note)
             return note
         }
     }
 
-    public func update(_ number: Int, kind: NoteKind, text: String, author: String) {
+    public func update(_ number: Int, kind: NoteKind, text: String, author: String, marks: [CGRect]) {
         locked {
             guard let i = stored.firstIndex(where: { $0.number == number }) else { return }
             stored[i].kind = kind
             stored[i].text = text
             stored[i].author = author
+            stored[i].marks = marks
         }
     }
 

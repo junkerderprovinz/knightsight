@@ -174,12 +174,25 @@ struct Reply: Encodable {
     var notes: [NoteReply]?
 }
 
-/// A note in picture coordinates. A pin has no size.
 struct NoteReply: Encodable {
     let number: Int
     let kind: NoteKind
     let text: String
     let author: String
+    let marks: [MarkReply]
+
+    init(_ entry: Round.Entry) {
+        number = entry.note.number
+        kind = entry.note.kind
+        text = entry.note.text
+        author = entry.note.author
+        marks = entry.marks.map(MarkReply.init)
+    }
+}
+
+/// A mark in picture coordinates. A pin has no size.
+struct MarkReply: Encodable {
+    let label: String
     let x: Int
     let y: Int
     let width: Int?
@@ -187,18 +200,15 @@ struct NoteReply: Encodable {
     let pin: Bool?
     let image: String?
 
-    init(_ entry: Round.Entry) {
-        let place = entry.place, pin = entry.note.isPin
-        number = entry.note.number
-        kind = entry.note.kind
-        text = entry.note.text
-        author = entry.note.author
+    init(_ mark: Round.Mark) {
+        let place = mark.place, pin = place.size == .zero
+        label = mark.label
         x = Int(place.minX.rounded())
         y = Int(place.minY.rounded())
         width = pin ? nil : Int(place.width.rounded())
         height = pin ? nil : Int(place.height.rounded())
         self.pin = pin ? true : nil
-        image = entry.image?.base64EncodedString()
+        image = mark.image?.base64EncodedString()
     }
 }
 

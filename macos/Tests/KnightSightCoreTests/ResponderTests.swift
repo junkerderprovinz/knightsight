@@ -222,7 +222,7 @@ final class ResponderTests: XCTestCase {
     }
 
     func send(_ notes: [Note], round number: Int = 1) {
-        let round = Round(number: number, sent: Date(timeIntervalSince1970: 0), title: "notes.txt", share: desk.share!, image: Data([7]), notes: notes) { _, box in
+        let round = Round(number: number, sent: Date(timeIntervalSince1970: 0), title: "notes.txt", share: desk.share!, image: Data([7]), notes: notes) { _, _, box in
             Data("\(box)".utf8)
         }
         desk.board.send(round)
@@ -239,8 +239,8 @@ final class ResponderTests: XCTestCase {
 
     func testNotesComeInPictureCoordinatesAndByNumber() throws {
         send([
-            Note(number: 4, kind: .question, text: "Why two scrollbars?", author: "Junker", mark: CGRect(x: 200.3, y: 150, width: 0, height: 0)),
-            Note(number: 3, kind: .bug, text: "The button is cut off.", author: "Junker", mark: CGRect(x: 60, y: 40, width: 80, height: 20)),
+            Note(number: 4, kind: .question, text: "Why two scrollbars?", author: "Junker", marks: [CGRect(x: 200.3, y: 150, width: 0, height: 0)]),
+            Note(number: 3, kind: .bug, text: "The button is cut off.", author: "Junker", marks: [CGRect(x: 60, y: 40, width: 80, height: 20)]),
         ], round: 2)
         let r = try ask(["cmd": "notes"])
         XCTAssertEqual(r["ok"] as? Bool, true)
@@ -253,24 +253,39 @@ final class ResponderTests: XCTestCase {
         let notes = try XCTUnwrap(r["notes"] as? [[String: Any]])
         XCTAssertEqual(notes.map { $0["number"] as? Int }, [3, 4])
 
-        let box = notes[0]
-        XCTAssertEqual(box["kind"] as? String, "bug")
-        XCTAssertEqual(box["text"] as? String, "The button is cut off.")
-        XCTAssertEqual(box["author"] as? String, "Junker")
+        let bug = notes[0]
+        XCTAssertEqual(bug["kind"] as? String, "bug")
+        XCTAssertEqual(bug["text"] as? String, "The button is cut off.")
+        XCTAssertEqual(bug["author"] as? String, "Junker")
+        for gone in ["x", "y", "width", "height", "pin", "image"] { XCTAssertNil(bug[gone]) }
+        let box = try XCTUnwrap((bug["marks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(box["label"] as? String, "3")
         XCTAssertEqual([box["x"], box["y"], box["width"], box["height"]].map { $0 as? Int }, [120, 80, 160, 40])
         XCTAssertNil(box["pin"])
         XCTAssertNotNil(box["image"])
 
-        let pin = notes[1]
-        XCTAssertEqual(pin["kind"] as? String, "question")
+        let pin = try XCTUnwrap((notes[1]["marks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(notes[1]["kind"] as? String, "question")
         XCTAssertEqual([pin["x"], pin["y"]].map { $0 as? Int }, [401, 300])
         XCTAssertEqual(pin["pin"] as? Bool, true)
         XCTAssertNil(pin["width"])
         XCTAssertNil(pin["height"])
     }
 
+    func testANoteBringsItsMarksInOrderWithTheirLabels() throws {
+        send([Note(number: 3, kind: .bug, text: "Both are cut off.", author: "", marks: [
+            CGRect(x: 60, y: 40, width: 80, height: 20), CGRect(x: 200, y: 150, width: 0, height: 0),
+        ])])
+        let notes = try XCTUnwrap(try ask(["cmd": "notes"])["notes"] as? [[String: Any]])
+        let marks = try XCTUnwrap(notes[0]["marks"] as? [[String: Any]])
+        XCTAssertEqual(marks.map { $0["label"] as? String }, ["3a", "3b"])
+        XCTAssertEqual(marks.map { $0["x"] as? Int }, [120, 400])
+        XCTAssertEqual(marks.map { $0["pin"] as? Bool }, [nil, true])
+        XCTAssertEqual(marks.map { $0["image"] == nil }, [false, false])
+    }
+
     func testFetchingNotesIsNoWork() throws {
-        send([Note(number: 1, kind: .wish, text: "Bigger, please.", author: "", mark: CGRect(x: 10, y: 10, width: 20, height: 20))])
+        send([Note(number: 1, kind: .wish, text: "Bigger, please.", author: "", marks: [CGRect(x: 10, y: 10, width: 20, height: 20)])])
         _ = try ask(["cmd": "notes"])
         _ = try ask(["cmd": "notes", "unread": true])
         XCTAssertEqual(desk.labels, [])
@@ -278,7 +293,7 @@ final class ResponderTests: XCTestCase {
     }
 
     func testUnreadHandsOutARoundOnce() throws {
-        send([Note(number: 1, kind: .wish, text: "Bigger, please.", author: "", mark: CGRect(x: 10, y: 10, width: 20, height: 20))])
+        send([Note(number: 1, kind: .wish, text: "Bigger, please.", author: "", marks: [CGRect(x: 10, y: 10, width: 20, height: 20)])])
         XCTAssertNotNil(try ask(["cmd": "notes", "unread": true])["notes"])
         let again = try ask(["cmd": "notes", "unread": true])
         XCTAssertEqual(again["round"] as? Int, 1)
@@ -286,11 +301,12 @@ final class ResponderTests: XCTestCase {
         XCTAssertNotNil(try ask(["cmd": "notes"])["notes"])
     }
 
-    func testANoteOutsideTheShareComesWithoutACrop() throws {
-        send([Note(number: 1, kind: .bug, text: "Gone.", author: "", mark: CGRect(x: 900, y: 10, width: 20, height: 20))])
+    func testAMarkOutsideTheShareComesWithoutACrop() throws {
+        send([Note(number: 1, kind: .bug, text: "Gone.", author: "", marks: [CGRect(x: 900, y: 10, width: 20, height: 20)])])
         let notes = try XCTUnwrap(try ask(["cmd": "notes"])["notes"] as? [[String: Any]])
-        XCTAssertEqual(notes[0]["x"] as? Int, 1800)
-        XCTAssertNil(notes[0]["image"])
+        let mark = try XCTUnwrap((notes[0]["marks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(mark["x"] as? Int, 1800)
+        XCTAssertNil(mark["image"])
     }
 
     func testRepliesStayEnglishInGerman() throws {

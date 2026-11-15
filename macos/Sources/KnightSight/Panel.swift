@@ -115,6 +115,7 @@ final class Panel: NSObject, NSWindowDelegate {
         view.toggle.title = active ? say.stopShare : say.startShare
         view.toggle.glyph = active ? .stop : .start
         view.pin.isEnabled = active
+        hotkey?.pinboardKey = active
         view.pin.filled = pinboard.isOpen ? Theme.accent : nil
     }
 

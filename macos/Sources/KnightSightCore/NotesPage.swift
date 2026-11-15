@@ -26,8 +26,10 @@ extension Round {
         img { display: block; max-width: 100%; height: auto; border-radius: 6px; }
         .note { background: var(--surface); border-radius: 10px; padding: 16px; margin: 16px 0; }
         .head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
-        .badge { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; font-size: 12px; color: #161616; }
+        .badge { box-sizing: border-box; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; display: grid; place-items: center; font-weight: 600; font-size: 12px; color: #161616; }
         .text { white-space: pre-wrap; margin: 0 0 12px; }
+        figure { margin: 12px 0 0; }
+        figcaption { display: flex; margin-bottom: 6px; }
         </style>
         </head>
         <body>
@@ -44,7 +46,16 @@ extension Round {
             page += "<span class=\"kind\">\(escaped(say.kind(note.kind)))</span>"
             if !note.author.isEmpty { page += "<span class=\"from\">\(escaped(say.from(note.author)))</span>" }
             page += "</div>\n<p class=\"text\">\(escaped(note.text))</p>\n"
-            if let crop = entry.image { page += "<img src=\"data:image/png;base64,\(crop.base64EncodedString())\" alt=\"\">\n" }
+            for mark in entry.marks {
+                guard let crop = mark.image else { continue }
+                let picture = "<img src=\"data:image/png;base64,\(crop.base64EncodedString())\" alt=\"\">"
+                // One crop needs no label beside the note's own badge.
+                if entry.marks.count == 1 {
+                    page += picture + "\n"
+                } else {
+                    page += "<figure><figcaption><span class=\"badge\" style=\"background: #\(color)\">\(mark.label)</span></figcaption>\(picture)</figure>\n"
+                }
+            }
             page += "</section>\n"
         }
         return page + "</main>\n</body>\n</html>\n"

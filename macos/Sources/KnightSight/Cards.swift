@@ -3,7 +3,7 @@ import KnightSightCore
 
 /// The card beside a mark where its note is written: its kind, its text and who wrote it.
 final class NoteEditor: NSView, NSTextViewDelegate {
-    static let size = CGSize(width: 300, height: 294)
+    static let size = CGSize(width: 300, height: 316)
 
     let close = SoftButton("", glyph: .close)
     let deleteButton: SoftButton
@@ -11,6 +11,7 @@ final class NoteEditor: NSView, NSTextViewDelegate {
     var onChange: () -> Void = {}
     private(set) var kind = NoteKind.wish
     private var title = ""
+    private let hint: String
     private let kinds: [SoftButton]
     private let textBox = RoundBox(), authorBox = RoundBox()
     private let scroll = NSScrollView()
@@ -24,6 +25,7 @@ final class NoteEditor: NSView, NSTextViewDelegate {
         deleteButton = SoftButton(say.delete, glyph: .none)
         saveButton = SoftButton(say.save, glyph: .none, kind: .primary)
         kinds = NoteKind.allCases.map { SoftButton(say.kind($0), glyph: .none) }
+        hint = say.moreSpots
         super.init(frame: CGRect(origin: .zero, size: NoteEditor.size))
         let width = NoteEditor.size.width, pad: CGFloat = 16
         close.frame = CGRect(x: width - pad - 24, y: pad, width: 24, height: 24)
@@ -70,8 +72,8 @@ final class NoteEditor: NSView, NSTextViewDelegate {
         authorField.placeholderString = say.authorPlaceholder
         authorBox.addSubview(authorField)
 
-        deleteButton.frame = CGRect(x: pad, y: 246, width: 96, height: 32)
-        saveButton.frame = CGRect(x: width - pad - 104, y: 246, width: 104, height: 32)
+        deleteButton.frame = CGRect(x: pad, y: 268, width: 96, height: 32)
+        saveButton.frame = CGRect(x: width - pad - 104, y: 268, width: 104, height: 32)
         for view in [close, textBox, authorBox, deleteButton, saveButton] as [NSView] { addSubview(view) }
         for button in kinds { addSubview(button) }
         restyle()
@@ -136,6 +138,11 @@ final class NoteEditor: NSView, NSTextViewDelegate {
         let attributes: [NSAttributedString.Key: Any] = [.font: Theme.semiBold(15), .foregroundColor: Theme.text]
         let height = title.size(withAttributes: attributes).height
         title.draw(at: CGPoint(x: 16, y: 16 + (24 - height) / 2), withAttributes: attributes)
+        let line = NSMutableParagraphStyle()
+        line.lineBreakMode = .byTruncatingTail
+        hint.draw(
+            with: CGRect(x: 16, y: 236, width: bounds.width - 32, height: 16), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+            attributes: [.font: Theme.regular(11), .foregroundColor: Theme.muted, .paragraphStyle: line], context: nil)
     }
 }
 
@@ -279,9 +286,9 @@ final class NoteRows: NSView {
                 NSBezierPath(roundedRect: r.insetBy(dx: 0, dy: 2), xRadius: 6, yRadius: 6).fill()
                 say.goThere.draw(at: CGPoint(x: r.maxX - 8 - goSize.width, y: r.midY - goSize.height / 2), withAttributes: go)
             }
-            Markers.disc(at: CGPoint(x: r.minX + 19, y: r.midY), diameter: 22, color: Theme.kind(note.kind), number: note.number, ring: 0)
+            Markers.disc(at: CGPoint(x: r.minX + 19, y: r.midY), diameter: 22, color: Theme.kind(note.kind), label: "\(note.number)", ring: 0)
             let x = r.minX + 40, width = r.maxX - 8 - x - (lit ? goSize.width + 8 : 0)
-            say.kind(note.kind).draw(
+            say.kindLine(note).draw(
                 with: CGRect(x: x, y: r.minY + 5, width: width, height: 16), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
                 attributes: [.font: Theme.regular(11), .foregroundColor: Theme.muted, .paragraphStyle: line], context: nil)
             note.text.replacingOccurrences(of: "\n", with: " ").draw(
