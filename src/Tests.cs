@@ -48,7 +48,7 @@ namespace KnightSight
         {
             var board = new Board();
             board.Toggle(true);
-            foreach (var mark in marks) board.Add(mark, NoteKind.Wish, "note at " + mark.Location, "Tester");
+            foreach (var mark in marks) board.Add(new[] { mark }, NoteKind.Wish, "note at " + mark.Location, "Tester");
             return board;
         }
 
@@ -61,6 +61,11 @@ namespace KnightSight
         static Dictionary<string, object> Field(Dictionary<string, object> round, int note)
         {
             return (Dictionary<string, object>)((IList)round["notes"])[note];
+        }
+
+        static Dictionary<string, object> Mark(Dictionary<string, object> note, int mark)
+        {
+            return (Dictionary<string, object>)((IList)note["marks"])[mark];
         }
 
         static Size PngSize(object base64)
@@ -151,7 +156,7 @@ namespace KnightSight
             Same(0, board.Notes.Count);
             True(!board.Open, "sending closes the pinboard");
             board.Toggle(true);
-            Same(3, board.Add(new RectangleF(3, 3, 0, 0), NoteKind.Bug, "third", "").Number);
+            Same(3, board.Add(new[] { new RectangleF(3, 3, 0, 0) }, NoteKind.Bug, "third", "").Number);
         }
 
         static void NothingSentYetAnswersRoundZero()
@@ -184,8 +189,8 @@ namespace KnightSight
         static void RoundDescribesEachNoteInPictureCoordinates()
         {
             var board = BoardWith();
-            board.Add(new RectangleF(100, 50, 40, 30), NoteKind.Bug, "Cut off", "Junker");
-            board.Add(new RectangleF(300, 200, 0, 0), NoteKind.Question, "Why?", "Junker");
+            board.Add(new[] { new RectangleF(100, 50, 40, 30) }, NoteKind.Bug, "Cut off", "Junker");
+            board.Add(new[] { new RectangleF(300, 200, 0, 0) }, NoteKind.Question, "Why?", "Junker");
             var round = RoundOf(board, new Size(800, 600), 1);
             Same(1, round["round"]);
             Same("2026-11-15T13:03:12Z", round["sent"]);
@@ -197,16 +202,21 @@ namespace KnightSight
             Same("bug", bug["kind"]);
             Same("Cut off", bug["text"]);
             Same("Junker", bug["author"]);
-            Same(100, bug["x"]);
-            Same(50, bug["y"]);
-            Same(40, bug["width"]);
-            Same(30, bug["height"]);
-            True(!bug.ContainsKey("pin"), "a box is no pin");
+            True(!bug.ContainsKey("x"), "the place belongs to the marks");
+            var box = Mark(bug, 0);
+            Same("1", box["label"]);
+            Same(100, box["x"]);
+            Same(50, box["y"]);
+            Same(40, box["width"]);
+            Same(30, box["height"]);
+            True(!box.ContainsKey("pin"), "a box is no pin");
             var question = Field(round, 1);
             Same("question", question["kind"]);
-            Same(true, question["pin"]);
-            Same(300, question["x"]);
-            True(!question.ContainsKey("width"), "a pin has no size");
+            var pin = Mark(question, 0);
+            Same("2", pin["label"]);
+            Same(true, pin["pin"]);
+            Same(300, pin["x"]);
+            True(!pin.ContainsKey("width"), "a pin has no size");
         }
 
         static void RoundOfALargeShareScalesLikeLook()
@@ -216,7 +226,7 @@ namespace KnightSight
             Same(1568, round["width"]);
             Same(1000, round["height"]);
             Same(new Size(1568, 1000), PngSize(round["image"]));
-            var note = Field(round, 0);
+            var note = Mark(Field(round, 0), 0);
             Same(500, note["x"]);
             Same(250, note["y"]);
             Same(100, note["width"]);
@@ -226,7 +236,7 @@ namespace KnightSight
         static void RoundOfAWindowOnADenseScreenCountsInItsPixels()
         {
             var board = BoardWith(new RectangleF(100, 50, 40, 30));
-            var note = Field(RoundOf(board, new Size(1200, 900), 1.5f), 0);
+            var note = Mark(Field(RoundOf(board, new Size(1200, 900), 1.5f), 0), 0);
             Same(150, note["x"]);
             Same(75, note["y"]);
             Same(60, note["width"]);
@@ -242,13 +252,70 @@ namespace KnightSight
         static void SavedPageShowsTheNotesEscaped()
         {
             var board = BoardWith();
-            board.Add(new RectangleF(10, 10, 20, 20), NoteKind.Bug, "<b>Too</b> & wide", "Junker");
+            board.Add(new[] { new RectangleF(10, 10, 20, 20) }, NoteKind.Bug, "<b>Too</b> & wide", "Junker");
             string page;
             using (var bmp = new Bitmap(100, 100)) page = Board.Page(board.Seal(bmp, 1, "A <window>", DateTime.UtcNow));
             True(page.Contains("&lt;b&gt;Too&lt;/b&gt; &amp; wide"), "the note text is escaped");
             True(page.Contains("A &lt;window&gt;"), "the title is escaped");
             True(page.Contains("data:image/png;base64,"), "the pictures are inside the page");
             True(!page.Contains("<b>Too"), "no raw markup from the note");
+        }
+
+        static void SingleMarkIsLabelledWithItsNumber()
+        {
+            Same("3", Note.Label(3, 0, 1));
+        }
+
+        static void SeveralMarksAreLabelledWithLetters()
+        {
+            Same("3a", Note.Label(3, 0, 2));
+            Same("3b", Note.Label(3, 1, 2));
+            Same("12z", Note.Label(12, 25, 26));
+        }
+
+        static void NoteTakesUpToTwentySixMarks()
+        {
+            var marks = new List<RectangleF>();
+            for (int i = 0; i < 25; i++) True(Note.AddMark(marks, new RectangleF(i, i, 0, 0)), "mark " + (i + 1) + " fits");
+            True(Note.AddMark(marks, new RectangleF(50, 50, 10, 10)), "the twenty-sixth fits");
+            True(!Note.AddMark(marks, new RectangleF(60, 60, 0, 0)), "a twenty-seventh does not");
+            Same(26, marks.Count);
+        }
+
+        static void LastMarkOfANoteStays()
+        {
+            var marks = new List<RectangleF> { new RectangleF(1, 1, 0, 0) };
+            True(!Note.RemoveMark(marks, 0), "the only mark stays");
+            Same(1, marks.Count);
+            marks.Add(new RectangleF(5, 5, 10, 10));
+            True(Note.RemoveMark(marks, 0), "one of two goes");
+            Same(new RectangleF(5, 5, 10, 10), marks[0]);
+        }
+
+        static void RoundGivesEachMarkItsOwnLabelAndCrop()
+        {
+            var board = BoardWith();
+            board.Add(new[] { new RectangleF(100, 50, 40, 30), new RectangleF(300, 200, 0, 0) }, NoteKind.Bug, "Two spots", "Junker");
+            var note = Field(RoundOf(board, new Size(800, 600), 1), 0);
+            Same(2, ((IList)note["marks"]).Count);
+            var box = Mark(note, 0);
+            Same("1a", box["label"]);
+            Same(40, box["width"]);
+            Same(new Size(88, 78), PngSize(box["image"]));
+            var pin = Mark(note, 1);
+            Same("1b", pin["label"]);
+            Same(true, pin["pin"]);
+            Same(new Size(240, 240), PngSize(pin["image"]));
+        }
+
+        static void SavedPageShowsEveryCropWithItsLabel()
+        {
+            var board = BoardWith();
+            board.Add(new[] { new RectangleF(10, 10, 20, 20), new RectangleF(60, 60, 0, 0) }, NoteKind.Wish, "Both", "");
+            string page;
+            using (var bmp = new Bitmap(100, 100)) page = Board.Page(board.Seal(bmp, 1, "t", DateTime.UtcNow));
+            True(page.Contains(">1a<") && page.Contains(">1b<"), "both labels are on the page");
+            Same(3, page.Split(new[] { "data:image/png;base64," }, StringSplitOptions.None).Length - 1);
         }
     }
 }
