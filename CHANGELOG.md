@@ -4,6 +4,12 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## Unreleased
+
+## 🎨 Design
+
+- **The pinboard has a full button.** It sits beside the info button with its name on it, like the other buttons, instead of a small round pin icon. A long window title still ends before it, and the status line below runs on to the info button.
+
 ## v1.1.1 (2026-11-15)
 
 A minimized window is no longer in the way.

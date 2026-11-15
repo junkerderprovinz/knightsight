@@ -371,7 +371,7 @@ final class PanelView: NSView {
         pickWindow = SoftButton(say.pickWindow, glyph: .window)
         pickRegion = SoftButton(say.pickRegion, glyph: .region)
         toggle = SoftButton(say.startShare, glyph: .start, kind: .primary)
-        pin = SoftButton("", glyph: .pin)
+        pin = SoftButton(say.pinboard, glyph: .pin)
         info = SoftButton("", glyph: .info)
         super.init(frame: CGRect(x: 0, y: 0, width: PanelView.width, height: PanelView.height))
         let card = self.card
@@ -383,8 +383,7 @@ final class PanelView: NSView {
         info.radius = 14
         info.toolTip = say.help
         info.setAccessibilityLabel(say.help)
-        pin.frame = CGRect(x: info.frame.minX - 8 - 28, y: info.frame.minY, width: 28, height: 28)
-        pin.radius = 14
+        pin.frame = CGRect(x: info.frame.minX - 10 - 124, y: card.minY + 16, width: 124, height: 32)
         pin.toolTip = say.pinboardTip
         pin.setAccessibilityLabel(say.pinboardTip)
         for button in [pickWindow, pickRegion, toggle, pin, info] { addSubview(button) }
@@ -453,8 +452,9 @@ final class PanelView: NSView {
             with: CGRect(x: area.minX, y: area.minY + dy, width: area.width, height: 24),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
             attributes: [.font: Theme.semiBold(16), .foregroundColor: Theme.text.withAlphaComponent(alpha), .paragraphStyle: style])
+        // The subline sits below the pinboard button, so it may run on up to the info button.
         sub.draw(
-            with: CGRect(x: area.minX + indent, y: area.minY + 26 + dy, width: area.width - indent, height: 20),
+            with: CGRect(x: area.minX + indent, y: area.minY + 26 + dy, width: info.frame.minX - 12 - area.minX - indent, height: 20),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
             attributes: [.font: Theme.regular(13), .foregroundColor: Theme.secondary.withAlphaComponent(alpha), .paragraphStyle: style])
     }

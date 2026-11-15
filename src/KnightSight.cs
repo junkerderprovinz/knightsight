@@ -2416,8 +2416,7 @@ namespace KnightSight
             Place(toggle, Say.StartShare, buttonFont, card.Right - S(20) - S(176), buttonsY, S(176), S(40));
             Place(info, "", buttonFont, card.Right - S(20) - S(28), card.Y + S(18), S(28), S(28));
             info.Radius = S(14);
-            Place(pin, "", buttonFont, info.Left - S(8) - S(28), card.Y + S(18), S(28), S(28));
-            pin.Radius = S(14);
+            Place(pin, Say.Pinboard, buttonFont, info.Left - S(10) - S(124), card.Y + S(16), S(124), S(32));
             tip.SetToolTip(pin, Say.PinboardTip);
             info.Cursor = Cursors.Help;
             PlaceOnBar(close, Say.Close, PanelWidth - 44);
@@ -2527,7 +2526,9 @@ namespace KnightSight
             using (var body = new SolidBrush(Color.FromArgb(a, Theme.Secondary)))
             {
                 g.DrawString(head, titleFont, title, new RectangleF(area.X, area.Y + dy, area.Width, S(24)), format);
-                g.DrawString(sub, bodyFont, body, new RectangleF(area.X + indent, area.Y + S(26) + dy, area.Width - indent, S(20)), format);
+                // The subline sits below the pinboard button, so it may run on up to the info button.
+                float subWidth = info.Left - S(12) - area.X - indent;
+                g.DrawString(sub, bodyFont, body, new RectangleF(area.X + indent, area.Y + S(26) + dy, subWidth, S(20)), format);
             }
         }
 

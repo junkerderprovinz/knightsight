@@ -72,14 +72,15 @@ class Panel(Gtk.ApplicationWindow):
         self.pick_window = button("window", say.PICK_WINDOW, 148, 36)
         self.pick_region = button("region", say.PICK_REGION, 148, 36)
         self.toggle = button("start", say.START_SHARE, 176, 40, "primary")
-        self.pin = button("pin", "", 28, 28, "round")
+        self.pin = button("pin", say.PINBOARD, 124, 32)
         self.pin.set_tooltip_text(say.PINBOARD_TIP)
         self.info = button("info", "", 28, 28, "round")
-        self.buttons_left = cx + cw - 20 - 28 - 8 - 28
+        self.buttons_left = cx + cw - 20 - 28 - 10 - 124
+        self.info_left = cx + cw - 20 - 28
         fixed.put(self.pick_window, cx + 20, buttons_y + 2)
         fixed.put(self.pick_region, cx + 176, buttons_y + 2)
         fixed.put(self.toggle, cx + cw - 20 - 176, buttons_y)
-        fixed.put(self.pin, self.buttons_left, cy + 18)
+        fixed.put(self.pin, self.buttons_left, cy + 16)
         fixed.put(self.info, cx + cw - 20 - 28, cy + 18)
         self.info.set_cursor(Gdk.Cursor.new_from_name("help"))
         self.set_child(fixed)
@@ -369,8 +370,9 @@ class Panel(Gtk.ApplicationWindow):
     def texts(self, ctx, x, y, width, head, sub, alpha, dy):
         p = self.palette
         indent = 16
+        # The subline sits below the pinboard button, so it may run on up to the info button.
         for text, font, color, top, w in ((head, self.title_font, p.text, y + dy, width),
-                                          (sub, self.body_font, p.secondary, y + 26 + dy, width - indent)):
+                                          (sub, self.body_font, p.secondary, y + 26 + dy, self.info_left - 12 - x - indent)):
             layout = PangoCairo.create_layout(ctx)
             layout.set_font_description(font)
             layout.set_text(text, -1)
