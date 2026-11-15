@@ -4,11 +4,17 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
-## Unreleased
+## v1.1.1 (2026-11-15)
+
+A minimized window is no longer in the way.
 
 ## ⚡ Improved
 
-- **Minimized windows on Windows, macOS and Linux with X11.** When your assistant asks for a minimized window, KnightSight brings it back behind your other windows without taking the focus, instead of refusing.
+- **Minimized windows come back** on Windows, macOS and Linux with X11. When your assistant asks for a minimized window, KnightSight brings it back behind your other windows without taking the focus, instead of refusing.
+
+## 🐛 Fixed
+
+- **On macOS, minimizing the shared window no longer ends the share.** KnightSight took the minimized window for a closed one.
 
 ## v1.1.0 (2026-11-15)
 
