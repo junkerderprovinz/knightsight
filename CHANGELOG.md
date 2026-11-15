@@ -4,6 +4,13 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## Unreleased
+
+## ✨ Added
+
+- **The pinboard.** While you share, Ctrl+Alt+Shift+P (Ctrl+Option+Shift+P on a Mac) or the pin button opens it over the share. Drag a box or click a pin, write a note and mark it as a bug, a wish or a question. Done sends every note to your assistant, and Save as file keeps them as one HTML page. On Linux it opens as a window with a picture of the share.
+- **A seventh tool, `notes`,** which hands the assistant each note with its place, a picture of the marked spot and the whole share with numbered markers. With `wait` it waits for you to press Done.
+
 ## v1.0.0 (2026-11-13)
 
 The first release of KnightSight: one window or one screen region, shared with a coding assistant and nothing else, on Windows, macOS and Linux.

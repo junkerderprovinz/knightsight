@@ -104,7 +104,8 @@ The app and the quests in these pictures are made up.
 <p><a id="4-what-it-does" href="#4-what-it-does"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/4-what-it-does-dark.svg"><img src=".github/assets/sections/4-what-it-does.svg" alt="4. What it does" width="100%"></picture></a></p>
 
 - **You pick what it sees.** Click a window or drag a rectangle over part of the screen. A grey frame marks your pick, and it turns yellow once you start sharing.
-- **Six tools for the assistant.** `look` takes a picture, `click`, `scroll`, `type` and `key` act inside the share, and `steps` runs several of them in one go with a picture at the end if asked.
+- **Seven tools for the assistant.** `look` takes a picture, `click`, `scroll`, `type` and `key` act inside the share, `steps` runs several of them in one go with a picture at the end if asked, and `notes` reads what you pinned to the share.
+- **Notes right where you mean them.** While you share, Ctrl+Alt+Shift+P or the pin button opens the pinboard over the share, and your clicks go to the pinboard until you close it the same way. Drag a box around a spot or click to set a pin, then write what you noticed and mark it as a bug, a wish or a question. The notes move with the window. Done hands them all to your assistant, each with its place and a picture of the spot, and Save as file keeps them as one HTML page instead.
 - **Your pointer stays where you left it.** Clicks and keys go straight to the shared window, even when it sits behind other windows. Store apps only listen to real input, so they come to the front for a moment once mouse and keyboard have rested for about a second.
 - **Nothing outside the frame.** A click outside the share is refused, and so are the Windows and Super keys. A picture of a shared window shows that window alone, whatever lies on top of it.
 - **You can see when it works.** The frame pulses while the assistant is busy, and a small label at its top right corner says what it is doing, such as "Typing" or "Taking a screenshot".
@@ -116,9 +117,10 @@ The app and the quests in these pictures are made up.
 
 A few things work a little differently there.
 
-- **macOS 13 or newer:** KnightSight asks for Screen Recording and Accessibility the first time you share. It types into the shared window in the background, even while it is covered. For a click, a scroll or a shortcut with Cmd, it waits until mouse and keyboard have rested for about a second, brings the window to the front for a moment and then puts your pointer and your previous app back. If a click opens a menu, the window stays in front until the menu closes. Windows that are hidden, minimized or on another desktop stay out of reach.
+- **macOS 13 or newer:** the pinboard opens with Ctrl+Option+Shift+P. KnightSight asks for Screen Recording and Accessibility the first time you share. It types into the shared window in the background, even while it is covered. For a click, a scroll or a shortcut with Cmd, it waits until mouse and keyboard have rested for about a second, brings the window to the front for a moment and then puts your pointer and your previous app back. If a click opens a menu, the window stays in front until the menu closes. Windows that are hidden, minimized or on another desktop stay out of reach.
 - **Linux on X11:** the frame, the label and pictures of covered windows work as on Windows. For a click or a key, KnightSight waits until you have rested for about a second, brings the shared window forward for a moment and then hands your window and pointer back.
 - **Linux on Wayland:** your desktop asks which window or screen to share and shows its own sharing indicator. KnightSight can't draw on top of other apps there, so the frame goes around its own card instead. Clicks move your real pointer and land on whatever is visible at that spot, so keep the shared window uncovered. Keys go where the keyboard focus is.
+- **The pinboard on Linux** opens as a window of its own with a picture of the share, on X11 and Wayland alike, and you pin your notes onto that picture. **Take a new picture** brings it up to date.
 
 <br>
 
