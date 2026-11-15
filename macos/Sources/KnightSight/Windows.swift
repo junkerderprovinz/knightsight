@@ -121,13 +121,18 @@ enum Screens {
         return CGFloat(mode.pixelWidth) / CGFloat(mode.width)
     }
 
-    /// Where the space for windows begins on the area's screen, below the menu bar.
-    static func top(of area: CGRect) -> CGFloat {
+    /// The space for windows on the area's screen, between the menu bar and the Dock.
+    static func visible(for area: CGRect) -> CGRect {
         let id = display(for: area)
         let screen = NSScreen.screens.first {
             ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == id
         }
-        guard let screen else { return CGDisplayBounds(id).minY }
-        return flip(screen.visibleFrame).minY
+        guard let screen else { return CGDisplayBounds(id) }
+        return flip(screen.visibleFrame)
+    }
+
+    /// Where the space for windows begins on the area's screen, below the menu bar.
+    static func top(of area: CGRect) -> CGFloat {
+        visible(for: area).minY
     }
 }

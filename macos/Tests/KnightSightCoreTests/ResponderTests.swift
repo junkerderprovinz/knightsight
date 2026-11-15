@@ -29,6 +29,7 @@ final class FakeDesk: Desk {
     var calls: [Call] = []
     var labels: [String] = []
     let layout: KeyLayout = TestLayout()
+    let board = Board()
 
     func currentShare() -> Share? { share }
 
@@ -218,6 +219,78 @@ final class ResponderTests: XCTestCase {
         _ = try ask(["cmd": "look"])
         _ = try ask(["cmd": "key", "keys": "shift+pageup"])
         XCTAssertEqual(desk.labels, ["Drücke Ctrl+Alt+Entf", "Mache Screenshot", "Drücke Umschalt+Bild auf"])
+    }
+
+    func send(_ notes: [Note], round number: Int = 1) {
+        let round = Round(number: number, sent: Date(timeIntervalSince1970: 0), title: "notes.txt", share: desk.share!, image: Data([7]), notes: notes) { _, box in
+            Data("\(box)".utf8)
+        }
+        desk.board.send(round)
+    }
+
+    func testNotesBeforeTheFirstRoundAnswerRoundZeroEvenWhileNothingIsShared() throws {
+        desk.share = nil
+        let r = try ask(["cmd": "notes"])
+        XCTAssertEqual(r["ok"] as? Bool, true)
+        XCTAssertEqual(r["round"] as? Int, 0)
+        XCTAssertNil(r["notes"])
+        XCTAssertNil(r["image"])
+    }
+
+    func testNotesComeInPictureCoordinatesAndByNumber() throws {
+        send([
+            Note(number: 4, kind: .question, text: "Why two scrollbars?", author: "Junker", mark: CGRect(x: 200.3, y: 150, width: 0, height: 0)),
+            Note(number: 3, kind: .bug, text: "The button is cut off.", author: "Junker", mark: CGRect(x: 60, y: 40, width: 80, height: 20)),
+        ], round: 2)
+        let r = try ask(["cmd": "notes"])
+        XCTAssertEqual(r["ok"] as? Bool, true)
+        XCTAssertEqual(r["round"] as? Int, 2)
+        XCTAssertEqual(r["sent"] as? String, "1970-01-01T00:00:00Z")
+        XCTAssertEqual(r["title"] as? String, "notes.txt")
+        XCTAssertEqual(r["width"] as? Int, 1568)
+        XCTAssertEqual(r["height"] as? Int, 1200)
+        XCTAssertEqual(r["image"] as? String, "Bw==")
+        let notes = try XCTUnwrap(r["notes"] as? [[String: Any]])
+        XCTAssertEqual(notes.map { $0["number"] as? Int }, [3, 4])
+
+        let box = notes[0]
+        XCTAssertEqual(box["kind"] as? String, "bug")
+        XCTAssertEqual(box["text"] as? String, "The button is cut off.")
+        XCTAssertEqual(box["author"] as? String, "Junker")
+        XCTAssertEqual([box["x"], box["y"], box["width"], box["height"]].map { $0 as? Int }, [120, 80, 160, 40])
+        XCTAssertNil(box["pin"])
+        XCTAssertNotNil(box["image"])
+
+        let pin = notes[1]
+        XCTAssertEqual(pin["kind"] as? String, "question")
+        XCTAssertEqual([pin["x"], pin["y"]].map { $0 as? Int }, [401, 300])
+        XCTAssertEqual(pin["pin"] as? Bool, true)
+        XCTAssertNil(pin["width"])
+        XCTAssertNil(pin["height"])
+    }
+
+    func testFetchingNotesIsNoWork() throws {
+        send([Note(number: 1, kind: .wish, text: "Bigger, please.", author: "", mark: CGRect(x: 10, y: 10, width: 20, height: 20))])
+        _ = try ask(["cmd": "notes"])
+        _ = try ask(["cmd": "notes", "unread": true])
+        XCTAssertEqual(desk.labels, [])
+        XCTAssertEqual(desk.calls, [])
+    }
+
+    func testUnreadHandsOutARoundOnce() throws {
+        send([Note(number: 1, kind: .wish, text: "Bigger, please.", author: "", mark: CGRect(x: 10, y: 10, width: 20, height: 20))])
+        XCTAssertNotNil(try ask(["cmd": "notes", "unread": true])["notes"])
+        let again = try ask(["cmd": "notes", "unread": true])
+        XCTAssertEqual(again["round"] as? Int, 1)
+        XCTAssertNil(again["notes"])
+        XCTAssertNotNil(try ask(["cmd": "notes"])["notes"])
+    }
+
+    func testANoteOutsideTheShareComesWithoutACrop() throws {
+        send([Note(number: 1, kind: .bug, text: "Gone.", author: "", mark: CGRect(x: 900, y: 10, width: 20, height: 20))])
+        let notes = try XCTUnwrap(try ask(["cmd": "notes"])["notes"] as? [[String: Any]])
+        XCTAssertEqual(notes[0]["x"] as? Int, 1800)
+        XCTAssertNil(notes[0]["image"])
     }
 
     func testRepliesStayEnglishInGerman() throws {

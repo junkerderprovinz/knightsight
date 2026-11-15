@@ -36,6 +36,42 @@ public struct Say {
     public var pressingKey: String { pick("Pressing a key", "Drücke Taste") }
     public var waiting: String { pick("Waiting for a quiet moment", "Warte auf einen ruhigen Moment") }
 
+    public var pinboard: String { pick("Pinboard", "Pinnwand") }
+    public var pinboardTip: String { pick("Pinboard (Ctrl+Option+Shift+P)", "Pinnwand (Ctrl+Alt+Umschalt+P)") }
+    public var pinboardOn: String { pick("Pinboard on. Drag a box or click to set a pin.", "Pinnwand an. Markier eine Stelle oder setz eine Nadel.") }
+    public var fetched: String { pick("Your assistant has fetched your notes.", "Dein Assistent hat deine Notizen abgeholt.") }
+    public var newNote: String { pick("New note", "Neue Notiz") }
+    public var notePlaceholder: String { pick("What should your assistant know about this spot?", "Was soll dein Assistent zu dieser Stelle wissen?") }
+    public var authorPlaceholder: String { pick("Your name", "Dein Name") }
+    public var save: String { pick("Save", "Speichern") }
+    public var delete: String { pick("Delete", "Löschen") }
+    public var emptyBoard: String { pick("Drag a box around a spot or click to set a pin.", "Zieh ein Rechteck um eine Stelle oder klick für eine Nadel.") }
+    public var goThere: String { pick("Go there", "Hingehen") }
+    public var saveFile: String { pick("Save as file", "Als Datei speichern") }
+    public var done: String { pick("Done", "Fertig") }
+    public var closePinboard: String { pick("Close pinboard", "Pinnwand schließen") }
+    public var fileKind: String { pick("Pinboard notes", "Pinnwand-Notizen") }
+    public var fileName: String { pick("knightsight-notes.html", "knightsight-notizen.html") }
+
+    public func sent(_ count: Int) -> String {
+        count == 1
+            ? pick("Sent 1 note. Your assistant can fetch it now.", "1 Notiz gesendet. Dein Assistent kann sie abholen.")
+            : pick("Sent \(count) notes. Your assistant can fetch them now.", "\(count) Notizen gesendet. Dein Assistent kann sie abholen.")
+    }
+
+    public func kind(_ kind: NoteKind) -> String {
+        switch kind {
+        case .bug: return pick("Bug", "Fehler")
+        case .wish: return pick("Wish", "Wunsch")
+        case .question: return pick("Question", "Frage")
+        }
+    }
+
+    public func noteTitle(_ number: Int) -> String { pick("Note \(number)", "Notiz \(number)") }
+    public func fileHeading(_ title: String) -> String { pick("Pinboard notes on \(title)", "Pinnwand-Notizen zu \(title)") }
+    public func roundLabel(_ number: Int) -> String { pick("Round \(number)", "Runde \(number)") }
+    public func from(_ author: String) -> String { pick("from \(author)", "von \(author)") }
+
     /// The line the panel shows while macOS still holds back a permission.
     public func allow(screen: Bool, input: Bool) -> String {
         switch (screen, input) {
@@ -63,6 +99,7 @@ public struct Say {
                 "comes to the front once mouse and keyboard rest for about a second.\nAfterwards your own window and pointer go back to where they were.\n" +
                 "A window that is minimized, hidden or on another desktop is out of reach.\n\n" +
                 "KnightSight needs Screen Recording and Accessibility, both\nunder System Settings, Privacy & Security.\n\n" +
+                "Ctrl+Option+Shift+P opens the pinboard while you share.\nMark spots, write a note to each and click Done,\nthen your assistant can fetch them.\n\n" +
                 "Ctrl+Option+Shift+X ends the share at once,\nand so does closing this window.",
             "Grauer Rahmen: gewählt, aber noch nicht freigegeben.\n" +
                 "Gelber Rahmen: freigegeben. Angeschaut, geklickt und getippt\nwird nur darin, und erst auf Anfrage.\n" +
@@ -71,6 +108,7 @@ public struct Say {
                 "Kürzel mit Cmd kommt das Fenster kurz nach vorn, sobald du gut eine\nSekunde lang nichts eingibst. Danach sind dein Fenster und dein\nMauszeiger wieder da, wo sie waren.\n" +
                 "Minimiert, ausgeblendet oder auf einem anderen Schreibtisch ist es\nnicht erreichbar.\n\n" +
                 "KnightSight braucht Bildschirmaufnahme und Bedienungshilfen, beides\nunter Systemeinstellungen, Datenschutz & Sicherheit.\n\n" +
+                "Ctrl+Alt+Umschalt+P öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib zu jeder eine Notiz und\nklick auf Fertig. Dann kann dein Assistent sie abholen.\n\n" +
                 "Ctrl+Alt+Umschalt+X beendet die Freigabe sofort,\nSchließen beendet sie auch."
         )
     }

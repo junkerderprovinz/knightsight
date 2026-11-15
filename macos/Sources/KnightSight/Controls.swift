@@ -1,15 +1,17 @@
 import AppKit
 
-enum Glyph { case none, window, region, start, stop, info }
+enum Glyph { case none, window, region, start, stop, info, pin, close }
 
 /// A rounded button: neutral on the card, or the one filled accent button of the view.
 /// Hover fades in and a press sinks it a little, both as transitions over Motion.control.
+/// A filled colour lights a neutral button, such as the chosen kind of a note.
 final class SoftButton: NSButton {
     enum Kind { case neutral, primary }
 
     let kind: Kind
     var glyph: Glyph { didSet { needsDisplay = true } }
     var radius: CGFloat = 6
+    var filled: NSColor? { didSet { needsDisplay = true } }
     var onPress: () -> Void = {}
     private let label = Theme.semiBold(14)
     private var hovering = false, pressing = false
@@ -39,6 +41,9 @@ final class SoftButton: NSButton {
     override var isEnabled: Bool { didSet { animate() } }
 
     @objc private func pressed() { onPress() }
+
+    // The pinboard's cards sit over another app's window, and their first click should count.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseEntered(with event: NSEvent) {
         hovering = true
@@ -89,6 +94,9 @@ final class SoftButton: NSButton {
         if !isEnabled {
             fill = Theme.surface2
             ink = Theme.muted
+        } else if let filled {
+            fill = Motion.mix(filled, Theme.rgb(255, 255, 255), 0.3 * t)
+            ink = Theme.accentInk
         } else if kind == .primary {
             fill = Motion.mix(Theme.accent, Theme.accentHover, t)
             ink = Theme.accentInk
@@ -154,6 +162,14 @@ enum Glyphs {
             let cx = b.midX, d = 2.2 * k
             NSBezierPath(ovalIn: CGRect(x: cx - d / 2, y: b.minY + s * 0.27 - d / 2, width: d, height: d)).fill()
             stroke(line([(cx, b.minY + s * 0.45), (cx, b.minY + s * 0.73)]))
+        case .pin:
+            let head = CGRect(x: b.midX - s * 0.25, y: b.minY + s * 0.06, width: s * 0.5, height: s * 0.5)
+            stroke(NSBezierPath(ovalIn: head))
+            stroke(line([(b.midX, head.maxY), (b.midX, b.maxY - s * 0.04)]))
+        case .close:
+            let a = s * 0.24
+            stroke(line([(b.minX + a, b.minY + a), (b.maxX - a, b.maxY - a)]))
+            stroke(line([(b.maxX - a, b.minY + a), (b.minX + a, b.maxY - a)]))
         }
     }
 

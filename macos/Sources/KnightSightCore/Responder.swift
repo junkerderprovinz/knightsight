@@ -61,6 +61,7 @@ public struct Screenshot {
 /// The platform side of the panel: the share as it is right now, and the hands that act in it.
 public protocol Desk: AnyObject {
     var layout: KeyLayout { get }
+    var board: Board { get }
     /// The share while sharing is on, nil otherwise.
     func currentShare() -> Share?
     func began(_ doing: String)
@@ -108,6 +109,9 @@ public final class Responder {
 
     private func respond(to line: String) throws -> Reply {
         guard let request = Request(line) else { throw Refused("The request is not a JSON object.") }
+        // The person sent the notes on purpose, so they go out whether or not anything is
+        // shared. Fetching them is no work to show, as the MCP server asks every second.
+        if (try? request.text("cmd")) == "notes" { return notes(unread: request.flag("unread")) }
         guard let share = desk.currentShare() else { throw Refused.nothingShared }
         guard share.reachable else { throw Refused("The shared window is minimized, hidden or on another desktop.") }
         let cmd = try request.text("cmd")
@@ -140,6 +144,20 @@ public final class Responder {
         }
         return reply
     }
+
+    private func notes(unread: Bool) -> Reply {
+        let (number, latest) = desk.board.fetch(unread: unread)
+        var reply = Reply()
+        reply.round = number
+        guard let round = latest else { return reply }
+        reply.sent = ISO8601DateFormatter().string(from: round.sent)
+        reply.title = round.title
+        reply.width = round.width
+        reply.height = round.height
+        reply.image = round.image.base64EncodedString()
+        reply.notes = round.entries.map { NoteReply($0) }
+        return reply
+    }
 }
 
 struct Reply: Encodable {
@@ -151,6 +169,37 @@ struct Reply: Encodable {
     var width: Int?
     var height: Int?
     var note: String?
+    var round: Int?
+    var sent: String?
+    var notes: [NoteReply]?
+}
+
+/// A note in picture coordinates. A pin has no size.
+struct NoteReply: Encodable {
+    let number: Int
+    let kind: NoteKind
+    let text: String
+    let author: String
+    let x: Int
+    let y: Int
+    let width: Int?
+    let height: Int?
+    let pin: Bool?
+    let image: String?
+
+    init(_ entry: Round.Entry) {
+        let place = entry.place, pin = entry.note.isPin
+        number = entry.note.number
+        kind = entry.note.kind
+        text = entry.note.text
+        author = entry.note.author
+        x = Int(place.minX.rounded())
+        y = Int(place.minY.rounded())
+        width = pin ? nil : Int(place.width.rounded())
+        height = pin ? nil : Int(place.height.rounded())
+        self.pin = pin ? true : nil
+        image = entry.image?.base64EncodedString()
+    }
 }
 
 enum Value: Decodable {

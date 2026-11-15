@@ -1,4 +1,5 @@
 import AppKit
+import KnightSightCore
 
 /// The GlimStone palette for both appearances, and Noto Sans, which the bundle carries.
 enum Theme {
@@ -19,6 +20,11 @@ enum Theme {
 
     static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
         NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1)
+    }
+
+    static func kind(_ kind: NoteKind) -> NSColor {
+        let c = kind.color
+        return rgb(CGFloat(c >> 16), CGFloat(c >> 8 & 0xFF), CGFloat(c & 0xFF))
     }
 
     // Run outside the bundle, as with swift run, the fonts are missing and the system font stands in.

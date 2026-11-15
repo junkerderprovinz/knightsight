@@ -1,8 +1,9 @@
 import AppKit
 import KnightSightCore
+import UniformTypeIdentifiers
 
-/// The window that owns the share: choosing it, starting and ending it, and the frame and
-/// badge that show it on the screen.
+/// The window that owns the share: choosing it, starting and ending it, the frame and badge
+/// that show it on the screen, and the pinboard over it.
 final class Panel: NSObject, NSWindowDelegate {
     // A request less than this long ago counts as work in progress, so frame and badge stay
     // lit through the pauses between the steps of one task.
@@ -11,11 +12,14 @@ final class Panel: NSObject, NSWindowDelegate {
 
     private let say = Say.current
     private let session = Session()
+    private let board = Board()
     private let window: NSWindow
     private let view: PanelView
     private let frame = Frame()
     private let badge = Badge()
+    private let pinboard: Pinboard
     private let foreground: Foreground
+    private let desk: MacDesk
     private var hotkey: Hotkey?
     private var server: LineServer?
     private var picker: RegionPicker?
@@ -26,10 +30,14 @@ final class Panel: NSObject, NSWindowDelegate {
     private var frameColor = Theme.neutral
     private var last = Date()
     private var lastPermissionCheck = Date.distantPast
+    private var notice: String?
+    private var sentRound = 0
 
     override init() {
         view = PanelView(say: say)
+        pinboard = Pinboard(board: board, say: say)
         foreground = Foreground(session: session, say: say)
+        desk = MacDesk(session: session, say: say, foreground: foreground, board: board)
         window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: PanelView.width, height: PanelView.height),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -52,10 +60,14 @@ final class Panel: NSObject, NSWindowDelegate {
             guard let self else { return }
             if session.active { stop() } else { start() }
         }
-        session.marks = Set((frame.edges + [badge.window]).map { CGWindowID($0.windowNumber) })
+        view.pin.onPress = { [weak self] in self?.togglePinboard() }
+        pinboard.onClose = { [weak self] in self?.togglePinboard() }
+        pinboard.onDone = { [weak self] in self?.sendNotes() }
+        pinboard.onSaveFile = { [weak self] in self?.saveNotes() }
+        session.marks = Set((frame.edges + [badge.window] + pinboard.windows).map { CGWindowID($0.windowNumber) })
 
-        hotkey = Hotkey { [weak self] in self?.stop() }
-        let responder = Responder(desk: MacDesk(session: session, say: say, foreground: foreground), say: say)
+        hotkey = Hotkey(stop: { [weak self] in self?.stop() }, pinboard: { [weak self] in self?.togglePinboard() })
+        let responder = Responder(desk: desk, say: say)
         server = try? LineServer(port: Responder.port, answer: responder.answer)
         server?.start()
         let timer = Timer(timeInterval: 1.0 / 60, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
@@ -87,7 +99,9 @@ final class Panel: NSObject, NSWindowDelegate {
         if picking { return say.clickTarget }
         if missing.screen || missing.input { return say.allow(screen: missing.screen, input: missing.input) }
         guard let chosen = session.chosen else { return say.chooseTarget }
+        if session.active && pinboard.isOpen { return say.pinboardOn }
         if session.active && working { return say.doing + session.doing }
+        if session.active, let notice { return notice }
         if session.active { return say.shared }
         return chosen.window != nil ? say.windowChosen : say.regionChosen
     }
@@ -100,6 +114,8 @@ final class Panel: NSObject, NSWindowDelegate {
         view.toggle.isEnabled = session.chosen != nil
         view.toggle.title = active ? say.stopShare : say.startShare
         view.toggle.glyph = active ? .stop : .start
+        view.pin.isEnabled = active
+        view.pin.filled = pinboard.isOpen ? Theme.accent : nil
     }
 
     private func startPick() {
@@ -115,7 +131,7 @@ final class Panel: NSObject, NSWindowDelegate {
            let w = Windows.front(at: Screens.flip(NSEvent.mouseLocation), skipping: session.marks),
            w.pid != Windows.ownPid, w.layer == 0 {
             picking = false
-            session.chosen = Chosen(window: w.id, region: .zero, title: w.title(say))
+            choose(Chosen(window: w.id, region: .zero, title: w.title(say)))
             showState()
         }
         buttonWasDown = down
@@ -127,7 +143,7 @@ final class Panel: NSObject, NSWindowDelegate {
         picker = RegionPicker { [weak self] area in
             guard let self else { return }
             if let area {
-                session.chosen = Chosen(window: nil, region: area, title: "\(say.region) \(Int(area.width)) x \(Int(area.height))")
+                choose(Chosen(window: nil, region: area, title: "\(say.region) \(Int(area.width)) x \(Int(area.height))"))
             }
             picker = nil
             window.makeKeyAndOrderFront(nil)
@@ -135,6 +151,13 @@ final class Panel: NSObject, NSWindowDelegate {
             showState()
         }
         picker?.show()
+    }
+
+    // Notes belong to what they were written on.
+    private func choose(_ chosen: Chosen) {
+        if session.chosen.map({ $0.window != chosen.window || $0.region != chosen.region }) ?? true { board.clear() }
+        session.chosen = chosen
+        notice = nil
     }
 
     // macOS asks the person itself, the first time an app wants a permission.
@@ -148,7 +171,71 @@ final class Panel: NSObject, NSWindowDelegate {
 
     private func stop() {
         session.active = false
+        notice = nil
+        closePinboard()
         showState()
+    }
+
+    private func togglePinboard() {
+        guard session.active else { return }
+        if pinboard.isOpen {
+            closePinboard()
+        } else {
+            notice = nil
+            pinboard.open()
+            session.pinboard = true
+        }
+        showState()
+    }
+
+    private func closePinboard() {
+        pinboard.close()
+        session.pinboard = false
+    }
+
+    private func sendNotes() {
+        capture { [self] round in
+            board.send(round)
+            closePinboard()
+            notice = say.sent(round.entries.count)
+            sentRound = round.number
+            showState()
+        }
+    }
+
+    private func saveNotes() {
+        capture { [self] round in
+            let panel = NSSavePanel()
+            panel.title = say.fileKind
+            panel.nameFieldStringValue = say.fileName
+            panel.allowedContentTypes = [.html]
+            NSApp.activate(ignoringOtherApps: true)
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            do {
+                try Data(round.page(say).utf8).write(to: url, options: .atomic)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
+    /// Pictures the share away from the main thread, so the panel keeps moving, and builds the
+    /// next round from the notes on the board. The pinboard's windows stay out of the picture.
+    private func capture(then use: @escaping (Round) -> Void) {
+        let notes = board.notes
+        guard !notes.isEmpty, !pinboard.sending, let share = desk.currentShare() else { return }
+        let number = board.nextRound
+        pinboard.sending = true
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            // Crops keep the screen's own density, so the share is pictured at that and scaled down after.
+            let full = CGSize(width: (share.area.width * share.pixelsPerPoint).rounded(), height: (share.area.height * share.pixelsPerPoint).rounded())
+            let shot = try? desk.picture(size: full)
+            DispatchQueue.main.async { [self] in
+                pinboard.sending = false
+                guard let shot else { return NSSound.beep() }
+                use(RoundPictures.round(number, notes: notes, share: share, shot: shot.image, title: shot.title))
+            }
+        }
     }
 
     @objc private func tick() {
@@ -169,8 +256,14 @@ final class Panel: NSObject, NSWindowDelegate {
         pulse = Motion.on ? CGFloat(0.5 - 0.5 * cos(2 * .pi * phase)) : 1
         if nowWorking != working {
             working = nowWorking
+            if working { notice = nil }
             showState()
         } else if working && view.subline != subline() {
+            showState()
+        }
+        if sentRound > 0 && board.fetched(sentRound) {
+            sentRound = 0
+            notice = say.fetched
             showState()
         }
         view.dotColor = !active ? Theme.neutral : working ? Motion.mix(Theme.accent, Theme.warning, pulse) : Theme.accent
@@ -183,6 +276,7 @@ final class Panel: NSObject, NSWindowDelegate {
             guard let w = Windows.info(id) else {
                 session.chosen = nil
                 session.active = false
+                closePinboard()
                 hideMarks()
                 return showState()
             }
@@ -215,18 +309,22 @@ final class Panel: NSObject, NSWindowDelegate {
         } else {
             badge.hide()
         }
+        if pinboard.isOpen { pinboard.follow(area) }
         stack(on: shared)
     }
 
     private func hideMarks() {
         frame.hide()
         badge.hide()
+        pinboard.hide()
     }
 
-    // Frame and badge sit right above a shared window: high enough to show, and no higher, so
-    // a window the person lays over the share stays clear of them. A region gets them on top.
+    // Frame, badge and pinboard sit right above a shared window: high enough to show, and no
+    // higher, so a window the person lays over the share stays clear of them. A region gets
+    // them on top. The pinboard's veil is ordered first and so ends up above the frame, and its
+    // cards move along with it as its child windows.
     private func stack(on shared: WindowInfo?) {
-        let marks = frame.edges + (badge.window.isVisible ? [badge.window] : [])
+        let marks = pinboard.shown + frame.edges + (badge.window.isVisible ? [badge.window] : [])
         let level = shared.map { NSWindow.Level(rawValue: $0.layer) } ?? .floating
         for mark in marks where mark.level != level { mark.level = level }
         guard let shared else { return }
@@ -240,7 +338,7 @@ final class Panel: NSObject, NSWindowDelegate {
             }
         }
         if seen == ids.count { return }
-        for mark in marks { mark.order(.above, relativeTo: Int(shared.id)) }
+        for mark in marks where mark.parent == nil { mark.order(.above, relativeTo: Int(shared.id)) }
     }
 
     // Above the top right corner of the frame, or inside it when the share reaches the top of its screen.
@@ -255,7 +353,7 @@ final class Panel: NSObject, NSWindowDelegate {
 final class PanelView: NSView {
     static let width: CGFloat = 580, height: CGFloat = 212, bar: CGFloat = 40, gutter: CGFloat = 16
 
-    let pickWindow: SoftButton, pickRegion: SoftButton, toggle: SoftButton, info: SoftButton
+    let pickWindow: SoftButton, pickRegion: SoftButton, toggle: SoftButton, pin: SoftButton, info: SoftButton
     private(set) var headline = "", subline = ""
     private var oldHeadline = "", oldSubline = ""
     private var swap = 1.0
@@ -272,6 +370,7 @@ final class PanelView: NSView {
         pickWindow = SoftButton(say.pickWindow, glyph: .window)
         pickRegion = SoftButton(say.pickRegion, glyph: .region)
         toggle = SoftButton(say.startShare, glyph: .start, kind: .primary)
+        pin = SoftButton("", glyph: .pin)
         info = SoftButton("", glyph: .info)
         super.init(frame: CGRect(x: 0, y: 0, width: PanelView.width, height: PanelView.height))
         let card = self.card
@@ -283,7 +382,11 @@ final class PanelView: NSView {
         info.radius = 14
         info.toolTip = say.help
         info.setAccessibilityLabel(say.help)
-        for button in [pickWindow, pickRegion, toggle, info] { addSubview(button) }
+        pin.frame = CGRect(x: info.frame.minX - 8 - 28, y: info.frame.minY, width: 28, height: 28)
+        pin.radius = 14
+        pin.toolTip = say.pinboardTip
+        pin.setAccessibilityLabel(say.pinboardTip)
+        for button in [pickWindow, pickRegion, toggle, pin, info] { addSubview(button) }
     }
 
     required init?(coder: NSCoder) {
@@ -325,7 +428,7 @@ final class PanelView: NSView {
         let spot = CGRect(x: card.minX + 20, y: card.minY + 18, width: 52, height: 52)
         logoImage().draw(in: spot, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         let textX = spot.maxX + 16
-        let area = CGRect(x: textX, y: card.minY + 20, width: info.frame.minX - 12 - textX, height: 48)
+        let area = CGRect(x: textX, y: card.minY + 20, width: pin.frame.minX - 12 - textX, height: 48)
 
         // The state dot: grey until shared, accent while shared, pulsing while work goes on.
         let d: CGFloat = 8, dy = area.minY + 26 + 10

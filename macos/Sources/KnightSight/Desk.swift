@@ -23,6 +23,7 @@ final class Session {
     private var storedLastRequest = Date.distantPast
     private var storedBusyUntil = Date.distantPast
     private var storedMarks: Set<CGWindowID> = []
+    private var storedPinboard = false
     private var storedFocus: WindowInfo?
     private var storedLent: (front: pid_t, holder: pid_t)?
 
@@ -46,10 +47,16 @@ final class Session {
     var lastRequest: Date { locked { storedLastRequest } }
     var busyUntil: Date { locked { storedBusyUntil } }
 
-    /// The frame and badge windows, which pictures and clicks pass through.
+    /// The frame, the badge and the pinboard's windows, which pictures and clicks pass through.
     var marks: Set<CGWindowID> {
         get { locked { storedMarks } }
         set { locked { storedMarks = newValue } }
+    }
+
+    /// Whether the pinboard lies over the share.
+    var pinboard: Bool {
+        get { locked { storedPinboard } }
+        set { locked { storedPinboard = newValue } }
     }
 
     /// In a region, the window last clicked there. Keys go to it.
@@ -81,11 +88,13 @@ final class Session {
 /// The Mac side of the share. It runs on the threads that serve the port, one request at a time.
 final class MacDesk: Desk {
     let layout: KeyLayout = SystemLayout()
+    let board: Board
     private let session: Session
     private let say: Say
     private let foreground: Foreground
 
-    init(session: Session, say: Say, foreground: Foreground) {
+    init(session: Session, say: Say, foreground: Foreground, board: Board) {
+        self.board = board
         self.session = session
         self.say = say
         self.foreground = foreground
@@ -105,24 +114,30 @@ final class MacDesk: Desk {
     }
 
     func look(size: CGSize) throws -> Screenshot {
+        let shot = try picture(size: size)
+        let note = shot.covered
+            ? "The window is fully covered. Some programs, browsers among them, stop drawing then, so the picture may be out of date."
+            : nil
+        return Screenshot(png: Bitmap.png(shot.image), title: shot.title, note: note)
+    }
+
+    /// The share laid into a picture of the given size, its title, and whether a shared
+    /// window lies fully covered.
+    func picture(size: CGSize) throws -> (image: CGImage, title: String, covered: Bool) {
         guard CGPreflightScreenCaptureAccess() else {
             throw Refused("KnightSight is not allowed to record the screen yet. The person at the Mac can turn it on in System Settings under Privacy & Security, Screen Recording.")
         }
         let chosen = try current()
         guard let id = chosen.window else {
-            let image = try Capture.region(chosen.region, skipping: session.marks, size: size)
-            return Screenshot(png: Bitmap.png(image), title: chosen.title, note: nil)
+            return try (Capture.region(chosen.region, skipping: session.marks, size: size), chosen.title, false)
         }
         let shared = try window(id)
-        let image = try Capture.window(shared, size: size)
-        let note = Windows.fullyCovered(shared, skipping: session.marks)
-            ? "The window is fully covered. Some programs, browsers among them, stop drawing then, so the picture may be out of date."
-            : nil
-        return Screenshot(png: Bitmap.png(image), title: shared.title(say), note: note)
+        return try (Capture.window(shared, size: size), shared.title(say), Windows.fullyCovered(shared, skipping: session.marks))
     }
 
     func click(at point: CGPoint, right: Bool, double: Bool) throws -> String {
         try needInput()
+        try needUncovered()
         let chosen = try current()
         let target = try self.target(at: point, in: chosen)
         if chosen.window == nil { session.focus = target }
@@ -132,6 +147,7 @@ final class MacDesk: Desk {
 
     func scroll(at point: CGPoint, notches: Int) throws -> String {
         try needInput()
+        try needUncovered()
         let target = try self.target(at: point, in: current())
         let note = try foreground.run(target, at: point) { Input.scroll(at: point, notches: notches) }
         return "Scrolled, briefly in the foreground." + note
@@ -165,6 +181,13 @@ final class MacDesk: Desk {
     private func needInput() throws {
         guard CGPreflightPostEventAccess() else {
             throw Refused("KnightSight is not allowed to send clicks and keys yet. The person at the Mac can turn it on in System Settings under Privacy & Security, Accessibility.")
+        }
+    }
+
+    // A real click or wheel turn would land on the pinboard and set a pin.
+    private func needUncovered() throws {
+        guard !session.pinboard else {
+            throw Refused("The person at the Mac has the pinboard open over the share, so clicks and scrolls would land on it. Try again once it is closed.")
         }
     }
 
