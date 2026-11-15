@@ -380,6 +380,19 @@ func run(_ mcp: Mcp) throws {
     keys(0x35, [])
     settled(after: "the menu closes")
 
+    if let targetWindow = (attribute(AXUIElementCreateApplication(shared.pid), kAXWindowsAttribute) as? [AXUIElement])?.first {
+        AXUIElementSetAttributeValue(targetWindow, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
+    }
+    let minimized = try? wait("the target to minimize", 5) { onScreen().contains { $0.id == shared.id } ? nil : true }
+    check(minimized ?? false, "the target minimizes")
+    let back = try mcp.tool("look")
+    try save(back, "7-minimized.png")
+    check(!back.isError, "look brings a minimized window back", back.text)
+    if let png = back.image {
+        check(pixel(png, inPicture(50, 50)).red, "the window that came back shows its band", "\(pixel(png, inPicture(50, 50)))")
+    }
+    check(frontmost() == "Other", "the window comes back behind the one in front", frontmost())
+
     keys(7, [.maskControl, .maskAlternate, .maskShift])
     let ended = try? wait("the hotkey to end the share", 5) { try mcp.tool("look").text.contains(nothingShared) ? true : nil }
     check(ended ?? false, "ctrl+option+shift+x ends the share")

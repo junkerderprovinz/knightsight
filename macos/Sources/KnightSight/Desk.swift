@@ -109,6 +109,11 @@ final class MacDesk: Desk {
         return Share(area: shared.bounds, pixelsPerPoint: density(shared.bounds), reachable: shared.onScreen)
     }
 
+    func bringBack() -> Bool {
+        guard session.active, let id = session.chosen?.window, let shared = Windows.info(id) else { return false }
+        return Foreground.unminimize(shared)
+    }
+
     func began(_ doing: String) {
         session.began(doing)
     }

@@ -110,16 +110,18 @@ The app and the quests in these pictures are made up.
 - **Nothing outside the frame.** A click outside the share is refused, and so are the Windows and Super keys. A picture of a shared window shows that window alone, whatever lies on top of it.
 - **You can see when it works.** The frame pulses while the assistant is busy, and a small label at its top right corner says what it is doing, such as "Typing" or "Taking a screenshot".
 - **One shortcut to stop.** Ctrl+Alt+Shift+X ends the share at once, and so does closing KnightSight.
-- **A few things stay out of reach.** A minimized window can't be shared, and a window running as administrator takes no input from it.
+- **Minimized is fine.** When your assistant asks for a minimized window, it comes back behind your other windows without taking the focus, so you keep working where you are.
+- **One thing stays out of reach.** A window running as administrator takes no input from KnightSight.
 - **Small and quiet.** One EXE on Windows, one app on macOS, a zip or a Flatpak on Linux. It speaks English, or German when your system does.
 
 ### On macOS and Linux
 
 A few things work a little differently there.
 
-- **macOS 13 or newer:** the pinboard opens with Cmd+Shift+A. KnightSight asks for Screen Recording and Accessibility the first time you share. It types into the shared window in the background, even while it is covered. For a click, a scroll or a shortcut with Cmd, it waits until mouse and keyboard have rested for about a second, brings the window to the front for a moment and then puts your pointer and your previous app back. If a click opens a menu, the window stays in front until the menu closes. Windows that are hidden, minimized or on another desktop stay out of reach.
+- **macOS 13 or newer:** the pinboard opens with Cmd+Shift+A. KnightSight asks for Screen Recording and Accessibility the first time you share. It types into the shared window in the background, even while it is covered. For a click, a scroll or a shortcut with Cmd, it waits until mouse and keyboard have rested for about a second, brings the window to the front for a moment and then puts your pointer and your previous app back. If a click opens a menu, the window stays in front until the menu closes. A minimized window comes back behind the others, while one that is hidden or on another desktop stays out of reach.
 - **Linux on X11:** the frame, the label and pictures of covered windows work as on Windows. For a click or a key, KnightSight waits until you have rested for about a second, brings the shared window forward for a moment and then hands your window and pointer back.
 - **Linux on Wayland:** your desktop asks which window or screen to share and shows its own sharing indicator. KnightSight can't draw on top of other apps there, so the frame goes around its own card instead. Clicks move your real pointer and land on whatever is visible at that spot, so keep the shared window uncovered. Keys go where the keyboard focus is.
+- **A minimized window on Linux** comes back behind the others on X11, as on Windows. On Wayland it stays out of reach.
 - **The pinboard on Linux** lies over the share on X11, as on Windows, when the desktop runs a compositor. On Wayland, and on X11 without one, it opens as a window of its own with a picture of the share, and you pin your notes onto that picture. **Take a new picture** brings it up to date.
 
 <br>

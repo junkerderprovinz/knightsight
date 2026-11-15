@@ -171,6 +171,12 @@ class SmokeX11(unittest.TestCase):
         self.assertEqual(run("xdotool", "getactivewindow", "getwindowname"), "Other")
         self.assertFalse([e for e in self.events() if e.startswith("Other")], "nothing reached the other window")
 
+        run("xdotool", "windowminimize", "--sync", window("Target"))
+        back = self.mcp.tool("look")
+        self.assertNotIn("isError", back, text_of(back))
+        self.assertEqual(pixel(image_of(back), 200, 150), (255, 0, 0), "a minimized window comes back to be seen")
+        self.assertEqual(run("xdotool", "getactivewindow", "getwindowname"), "Other")
+
         self.assertIn("outside the share", text_of(self.mcp.tool("click", x=400, y=10)))
         self.assertIn("whole system", text_of(self.mcp.tool("key", keys="super+a")))
         steps = self.mcp.tool("steps", steps=[{"action": "click", "x": 10, "y": 10}, {"action": "key", "keys": "win"}])

@@ -281,6 +281,26 @@ class Desk:
     def minimized(self, share):
         return bool(share.window) and self.workw.minimized(share.window)
 
+    def unminimize(self, share):
+        """A minimized window draws nothing. Mapping it again brings it back, and a restack
+        request puts it below the others, behind whatever the person is working in."""
+        w = share.window
+        active = self.work.prop(self.work.root, "_NET_ACTIVE_WINDOW")
+        xlib.XMapWindow(self.work.d, w)
+        self.work.send_root(w, "_NET_RESTACK_WINDOW", 2, 0, 1)
+        for _ in range(40):
+            if not self.workw.minimized(w):
+                break
+            time.sleep(0.025)
+        self.work.send_root(w, "_NET_RESTACK_WINDOW", 2, 0, 1)
+        # Window managers that focus a window as it maps get the old one handed back.
+        if active and active[0] and active[0] != w:
+            self.work.send_root(active[0], "_NET_ACTIVE_WINDOW", 2, 0, 0)
+        if self.workw.minimized(w):
+            return False
+        time.sleep(0.3)
+        return True
+
     def look(self, share):
         if share.window:
             reply = picture.encode(self._window_shot(share.window, self.workw))

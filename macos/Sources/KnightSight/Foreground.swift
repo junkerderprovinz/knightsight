@@ -81,6 +81,39 @@ final class Foreground {
         throw Refused("The shared window cannot be brought to the front.")
     }
 
+    /// A minimized window draws nothing, so it is brought back first. The app that was in front
+    /// takes the front again, which leaves the window behind what the person is working in.
+    static func unminimize(_ target: WindowInfo) -> Bool {
+        guard let window = minimizedWindow(of: target) else { return false }
+        let front = frontPid()
+        AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        for _ in 0..<40 where Windows.info(target.id)?.onScreen != true { usleep(25_000) }
+        if front != target.pid { activate(front) }
+        // The window counts as on screen while it still flies out of the Dock, warped, and the
+        // animation takes about half a second.
+        usleep(800_000)
+        return Windows.info(target.id)?.onScreen == true
+    }
+
+    // A minimized window keeps its frame in accessibility, but when that does not match, the
+    // app's only minimized window is the one.
+    private static func minimizedWindow(of target: WindowInfo) -> AXUIElement? {
+        var list: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(target.pid), kAXWindowsAttribute as CFString, &list) == .success,
+              let windows = list as? [AXUIElement]
+        else { return nil }
+        let minimized = windows.filter { (value($0, kAXMinimizedAttribute) as? Bool) == true }
+        return minimized.first { matches($0, target) } ?? (minimized.count == 1 ? minimized[0] : nil)
+    }
+
+    private static func matches(_ window: AXUIElement, _ target: WindowInfo) -> Bool {
+        var position = CGPoint.zero, size = CGSize.zero
+        guard let p = value(window, kAXPositionAttribute), AXValueGetValue(p as! AXValue, .cgPoint, &position),
+              let s = value(window, kAXSizeAttribute), AXValueGetValue(s as! AXValue, .cgSize, &size)
+        else { return false }
+        return CGRect(origin: position, size: size).insetBy(dx: -1, dy: -1).contains(target.bounds)
+    }
+
     private static func idle() -> Double {
         CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
     }
@@ -115,13 +148,7 @@ final class Foreground {
         guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(target.pid), kAXWindowsAttribute as CFString, &list) == .success,
               let windows = list as? [AXUIElement]
         else { return nil }
-        return windows.first { window in
-            var position = CGPoint.zero, size = CGSize.zero
-            guard let p = value(window, kAXPositionAttribute), AXValueGetValue(p as! AXValue, .cgPoint, &position),
-                  let s = value(window, kAXSizeAttribute), AXValueGetValue(s as! AXValue, .cgSize, &size)
-            else { return false }
-            return CGRect(origin: position, size: size).insetBy(dx: -1, dy: -1).contains(target.bounds)
-        }
+        return windows.first { matches($0, target) }
     }
 
     private static func value(_ element: AXUIElement, _ name: String) -> CFTypeRef? {

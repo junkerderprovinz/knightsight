@@ -64,6 +64,8 @@ public protocol Desk: AnyObject {
     var board: Board { get }
     /// The share while sharing is on, nil otherwise.
     func currentShare() -> Share?
+    /// Brings a minimized shared window back behind the others and tells whether it came.
+    func bringBack() -> Bool
     func began(_ doing: String)
     func look(size: CGSize) throws -> Screenshot
     func click(at point: CGPoint, right: Bool, double: Bool) throws -> String
@@ -112,7 +114,8 @@ public final class Responder {
         // The person sent the notes on purpose, so they go out whether or not anything is
         // shared. Fetching them is no work to show, as the MCP server asks every second.
         if (try? request.text("cmd")) == "notes" { return notes(unread: request.flag("unread")) }
-        guard let share = desk.currentShare() else { throw Refused.nothingShared }
+        guard var share = desk.currentShare() else { throw Refused.nothingShared }
+        if !share.reachable, desk.bringBack(), let back = desk.currentShare() { share = back }
         guard share.reachable else { throw Refused("The shared window is minimized, hidden or on another desktop.") }
         let cmd = try request.text("cmd")
         desk.began(say.describe(cmd, request))

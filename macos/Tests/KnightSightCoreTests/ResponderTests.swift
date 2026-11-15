@@ -31,7 +31,14 @@ final class FakeDesk: Desk {
     let layout: KeyLayout = TestLayout()
     let board = Board()
 
+    var comesBack = false
+
     func currentShare() -> Share? { share }
+
+    func bringBack() -> Bool {
+        if comesBack { share?.reachable = true }
+        return comesBack
+    }
 
     func began(_ doing: String) { labels.append(doing) }
 
@@ -99,6 +106,13 @@ final class ResponderTests: XCTestCase {
         desk.share?.reachable = false
         try assertRefused(["cmd": "type", "text": "hi"], "The shared window is minimized, hidden or on another desktop.")
         XCTAssertEqual(desk.calls, [])
+    }
+
+    func testBringsAMinimizedWindowBackBeforeActing() throws {
+        desk.share?.reachable = false
+        desk.comesBack = true
+        XCTAssertEqual(try ask(["cmd": "type", "text": "hi"])["ok"] as? Bool, true)
+        XCTAssertEqual(desk.calls, [.type("hi")])
     }
 
     func testRefusesALineThatIsNoJSONObject() throws {

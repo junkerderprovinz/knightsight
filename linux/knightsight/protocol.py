@@ -177,8 +177,8 @@ def reply(line, panel):
         if share is None:
             raise Refused(NOTHING_SHARED)
         desk = panel.desk
-        if desk.minimized(share):
-            raise Refused("The shared window is minimized.")
+        if desk.minimized(share) and not desk.unminimize(share):
+            raise Refused("The shared window is minimized and did not come back.")
         cmd = text(args, "cmd")
         panel.working(describe(cmd, args))
         if cmd == "look":

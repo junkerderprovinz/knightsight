@@ -14,9 +14,14 @@ class Desk:
     def __init__(self):
         self.done = []
         self.is_minimized = False
+        self.comes_back = False
 
     def minimized(self, share):
         return self.is_minimized
+
+    def unminimize(self, share):
+        self.is_minimized = not self.comes_back
+        return self.comes_back
 
     def look(self, share):
         return {"image": "", "width": share.width, "height": share.height, "title": "Test"}
@@ -63,10 +68,17 @@ class Replies(unittest.TestCase):
             self.assertEqual(ask(panel, **request), {"ok": False, "error": protocol.NOTHING_SHARED})
         self.assertIsNone(panel.doing)
 
-    def test_minimized_window_is_refused(self):
+    def test_minimized_window_that_stays_down_is_refused(self):
         panel = Panel()
         panel.desk.is_minimized = True
-        self.assertEqual(ask(panel, cmd="look")["error"], "The shared window is minimized.")
+        self.assertEqual(ask(panel, cmd="look")["error"], "The shared window is minimized and did not come back.")
+
+    def test_minimized_window_is_brought_back_and_looked_at(self):
+        panel = Panel()
+        panel.desk.is_minimized = True
+        panel.desk.comes_back = True
+        self.assertEqual(ask(panel, cmd="look")["title"], "Test")
+        self.assertFalse(panel.desk.is_minimized)
 
     def test_look_returns_the_picture_fields(self):
         reply = ask(Panel(), cmd="look")

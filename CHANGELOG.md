@@ -4,6 +4,12 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## Unreleased
+
+## ⚡ Improved
+
+- **Minimized windows on Windows, macOS and Linux with X11.** When your assistant asks for a minimized window, KnightSight brings it back behind your other windows without taking the focus, instead of refusing.
+
 ## v1.1.0 (2026-11-15)
 
 Notes for your assistant, pinned right onto the share.

@@ -183,6 +183,7 @@ if x11:
     XMatchVisualInfo = _bind(x11, "XMatchVisualInfo", c_int, D, c_int, c_int, c_int, POINTER(XVisualInfo))
     XDestroyWindow = _bind(x11, "XDestroyWindow", c_int, D, W)
     XMapRaised = _bind(x11, "XMapRaised", c_int, D, W)
+    XMapWindow = _bind(x11, "XMapWindow", c_int, D, W)
     XUnmapWindow = _bind(x11, "XUnmapWindow", c_int, D, W)
     XMoveResizeWindow = _bind(x11, "XMoveResizeWindow", c_int, D, W, c_int, c_int, c_uint, c_uint)
     XMoveWindow = _bind(x11, "XMoveWindow", c_int, D, W, c_int, c_int)

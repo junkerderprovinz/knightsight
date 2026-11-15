@@ -312,6 +312,9 @@ class Desk:
     def minimized(self, share):
         return False
 
+    def unminimize(self, share):
+        return False
+
     def show(self, share, area, color, width, badge):
         pass
 

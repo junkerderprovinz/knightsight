@@ -135,7 +135,7 @@ HELP_X11 = pick(
     "Carry on working as usual. For a click or a key the window comes\n"
     "to the front once mouse and keyboard rest for about a second.\n"
     "Afterwards your own window and pointer go back to where they were.\n"
-    "A minimized window is out of reach.\n\n" + _PINBOARD + "\n\n" + _ENDS,
+    "A minimized window comes back behind your other windows\nas soon as your assistant asks for it.\n\n" + _PINBOARD + "\n\n" + _ENDS,
     "Grauer Rahmen: gewählt, aber noch nicht freigegeben.\n"
     "Gelber Rahmen: freigegeben. Angeschaut, geklickt und getippt\nwird nur darin, und erst auf Anfrage.\n"
     "Pulsiert der Rahmen, wird gerade darin gearbeitet. Was genau,\n"
@@ -144,7 +144,7 @@ HELP_X11 = pick(
     "eine Taste kommt das Fenster kurz nach vorn, sobald du gut eine\n"
     "Sekunde lang nichts eingibst. Danach sind dein Fenster und dein\n"
     "Mauszeiger wieder da, wo sie waren.\n"
-    "Minimiert ist es nicht erreichbar.\n\n" + _PINBOARD + "\n\n" + _ENDS)
+    "Ein minimiertes Fenster kommt hinter deinen anderen Fenstern zurück,\nsobald dein Assistent danach fragt.\n\n" + _PINBOARD + "\n\n" + _ENDS)
 
 HELP_WAYLAND = pick(
     "The frame around this card shows the share. Grey: chosen,\n"

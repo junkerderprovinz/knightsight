@@ -59,6 +59,7 @@ namespace KnightSight
         [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
         [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int index);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int w, int h, uint flags);
+        [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc proc, IntPtr param);
         [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
@@ -170,14 +171,14 @@ namespace KnightSight
             "Yellow frame: shared. Looking, clicking and typing happen\nonly inside it, and only when asked.\n" +
             "A pulsing frame means something is being done in there. Its top\nright corner says what, such as \"Typing\" or \"Taking a screenshot\".\n\n" +
             "Carry on working as usual. Mouse and keyboard stay\nwith you, even while the window is covered.\n" +
-            "A minimized window is out of reach. Store apps come to the front\nfor a moment once mouse and keyboard rest for about a second.\n\n" +
+            "A minimized window comes back behind your other windows\nas soon as your assistant asks for it. Store apps come to the front\nfor a moment once mouse and keyboard rest for about a second.\n\n" +
             "Ctrl+Shift+A opens the pinboard while you share.\nMark spots, write a note to them and click Done,\nthen your assistant can fetch them.\n\n" +
             "Ctrl+Alt+Shift+X ends the share at once,\nand so does closing this window.",
             "Grauer Rahmen: gewählt, aber noch nicht freigegeben.\n" +
             "Gelber Rahmen: freigegeben. Angeschaut, geklickt und getippt\nwird nur darin, und erst auf Anfrage.\n" +
             "Pulsiert der Rahmen, wird gerade darin gearbeitet. Was genau,\nsteht oben rechts am Rahmen, etwa „Tippe“ oder „Mache Screenshot“.\n\n" +
             "Du kannst nebenbei normal weiterarbeiten. Maus und Tastatur\nbleiben bei dir, auch wenn das Fenster zugedeckt ist.\n" +
-            "Minimiert ist es nicht erreichbar. Store-Apps kommen kurz nach vorn,\nsobald du gut eine Sekunde lang nichts eingibst.\n\n" +
+            "Ein minimiertes Fenster kommt hinter deinen anderen Fenstern zurück,\nsobald dein Assistent danach fragt. Store-Apps kommen kurz nach vorn,\nsobald du gut eine Sekunde lang nichts eingibst.\n\n" +
             "Strg+Umschalt+A öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib eine Notiz dazu und\nklick auf Fertig. Dann kann dein Assistent sie abholen.\n\n" +
             "Strg+Alt+Umschalt+X beendet die Freigabe sofort,\nSchließen beendet sie auch.");
     }
@@ -246,6 +247,20 @@ namespace KnightSight
         }
 
         public static IntPtr Above(IntPtr h) { return Native.GetWindow(h, 3); }
+
+        // A minimized window draws nothing and takes no input. It comes back without focus at
+        // the bottom of the stack, behind whatever the person is working in, and gets a moment
+        // to paint before the first picture.
+        public static bool Unminimise(IntPtr h)
+        {
+            Native.SetWindowPos(h, (IntPtr)1, 0, 0, 0, 0, KeepPlace);
+            Native.ShowWindowAsync(h, 4);
+            for (int i = 0; i < 40 && Native.IsIconic(h); i++) Thread.Sleep(25);
+            Native.SetWindowPos(h, (IntPtr)1, 0, 0, 0, 0, KeepPlace);
+            if (Native.IsIconic(h)) return false;
+            Thread.Sleep(300);
+            return true;
+        }
 
         public static bool IsOwnedBy(IntPtr h, IntPtr owner)
         {
@@ -2916,7 +2931,8 @@ namespace KnightSight
                 }
                 var s = chosen;
                 if (s == null || !active) throw new Refused("Nothing is shared right now. Choose a window or a region in the KnightSight window and start sharing.");
-                if (s.Window != IntPtr.Zero && Native.IsIconic(s.Window)) throw new Refused("The shared window is minimized.");
+                if (s.Window != IntPtr.Zero && Native.IsIconic(s.Window) && !Win.Unminimise(s.Window))
+                    throw new Refused("The shared window is minimized and did not come back.");
                 var cmd = Str(args, "cmd");
                 doing = Describe(cmd, args);
                 Interlocked.Exchange(ref lastRequest, DateTime.UtcNow.Ticks);

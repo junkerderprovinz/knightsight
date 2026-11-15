@@ -107,7 +107,7 @@ public struct Say {
                 "A pulsing frame means something is being done in there. Its top\nright corner says what, such as \"Typing\" or \"Taking a screenshot\".\n\n" +
                 "Carry on working as usual. Typing reaches the window even while\nit is covered. For a click, a scroll or a shortcut with Cmd, the window\n" +
                 "comes to the front once mouse and keyboard rest for about a second.\nAfterwards your own window and pointer go back to where they were.\n" +
-                "A window that is minimized, hidden or on another desktop is out of reach.\n\n" +
+                "A minimized window comes back behind your other windows as soon as\nyour assistant asks for it. Hidden or on another desktop, it is out of reach.\n\n" +
                 "KnightSight needs Screen Recording and Accessibility, both\nunder System Settings, Privacy & Security.\n\n" +
                 "Cmd+Shift+A opens the pinboard while you share.\nMark spots, write a note to them and click Done,\nthen your assistant can fetch them.\n\n" +
                 "Ctrl+Option+Shift+X ends the share at once,\nand so does closing this window.",
@@ -116,7 +116,7 @@ public struct Say {
                 "Pulsiert der Rahmen, wird gerade darin gearbeitet. Was genau,\nsteht oben rechts am Rahmen, etwa „Tippe“ oder „Mache Screenshot“.\n\n" +
                 "Du kannst nebenbei normal weiterarbeiten. Getippt wird auch, wenn\ndas Fenster zugedeckt ist. Für einen Klick, zum Scrollen oder für ein\n" +
                 "Kürzel mit Cmd kommt das Fenster kurz nach vorn, sobald du gut eine\nSekunde lang nichts eingibst. Danach sind dein Fenster und dein\nMauszeiger wieder da, wo sie waren.\n" +
-                "Minimiert, ausgeblendet oder auf einem anderen Schreibtisch ist es\nnicht erreichbar.\n\n" +
+                "Ein minimiertes Fenster kommt hinter deinen anderen Fenstern zurück,\nsobald dein Assistent danach fragt. Ausgeblendet oder auf einem\nanderen Schreibtisch ist es nicht erreichbar.\n\n" +
                 "KnightSight braucht Bildschirmaufnahme und Bedienungshilfen, beides\nunter Systemeinstellungen, Datenschutz & Sicherheit.\n\n" +
                 "Cmd+Umschalt+A öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib eine Notiz dazu und\nklick auf Fertig. Dann kann dein Assistent sie abholen.\n\n" +
                 "Ctrl+Alt+Umschalt+X beendet die Freigabe sofort,\nSchließen beendet sie auch."

@@ -45,8 +45,10 @@ enum Windows {
         return entries.compactMap(WindowInfo.init)
     }
 
+    // Asked for one window, the window server leaves it out while it is minimized, so the full
+    // list is searched before the window counts as closed.
     static func info(_ id: CGWindowID) -> WindowInfo? {
-        list(.optionIncludingWindow, relativeTo: id).first
+        list(.optionIncludingWindow, relativeTo: id).first ?? list(.optionAll).first { $0.id == id }
     }
 
     /// On screen, front to back.

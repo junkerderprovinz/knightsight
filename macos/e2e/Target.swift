@@ -28,7 +28,7 @@ menu.addItem(appItem)
 menu.addItem(editItem)
 app.mainMenu = menu
 
-let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled, .miniaturizable], backing: .buffered, defer: false)
 window.title = title
 window.appearance = NSAppearance(named: .aqua)
 let band = NSView(frame: CGRect(x: 0, y: 200, width: 400, height: 100))
