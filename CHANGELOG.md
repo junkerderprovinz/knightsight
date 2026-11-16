@@ -6,31 +6,19 @@ Every release is written by hand. The full notes for each release are in
 
 ## v1.2.0 (2026-11-16)
 
-A new panel with a finder.
+A new panel with a finder, and minimized windows come back.
 
 ## 🎨 Design
 
-- **A new panel with a finder.** The left side of the panel shows the shared window as a small live picture. It turns from grey to colour when the share starts and its corners snap in yellow. While your assistant works, a line sweeps over it and a dot marks where it just clicked. The share button is bigger, the info button sits in the title bar, and the blacks and whites are a little warmer, in the dark and the light theme alike.
-
-## v1.1.2 (2026-11-15)
-
-The pinboard has a button of its own.
-
-## 🎨 Design
-
-- **The pinboard has a full button.** It sits beside the info button with its name on it, like the other buttons, instead of a small round pin icon. A long window title still ends before it, and the status line below runs on to the info button.
-
-## v1.1.1 (2026-11-15)
-
-A minimized window is no longer in the way.
+- **A new panel with a finder.** The left side of the panel shows the shared window as a small live picture. It turns from grey to colour when the share starts and its corners snap in yellow. While your assistant works, a line sweeps over it and a dot marks where it just clicked. The share button is bigger, the pinboard has a full button with its name, the info button sits in the title bar, and the blacks and whites are a little warmer, in the dark and the light theme alike.
 
 ## ⚡ Improved
 
-- **Minimized windows come back** on Windows, macOS and Linux with X11. When your assistant asks for a minimized window, KnightSight brings it back behind your other windows without taking the focus, instead of refusing.
+- **Minimized windows come back.** When your assistant asks for a minimized window, KnightSight restores it behind your other windows without taking the focus and gives it a moment to draw before the picture. This works on Windows, on macOS and on Linux with X11. Wayland offers no way to do it, so there a minimized window stays out of reach.
 
 ## 🐛 Fixed
 
-- **On macOS, minimizing the shared window no longer ends the share.** KnightSight took the minimized window for a closed one.
+- **On macOS, minimizing the shared window keeps the share.** The window server leaves a minimized window out when asked for it alone, and KnightSight took that for a closed window.
 
 ## v1.1.0 (2026-11-15)
 

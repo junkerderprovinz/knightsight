@@ -72,21 +72,9 @@
   <releases>
     <release version="1.2.0" date="2026-11-16">
       <description>
-        <p>A new panel with a finder: a small live picture of the shared window that turns from grey to colour when the share starts, with a sweeping line and a dot where your assistant clicks while it works.</p>
+        <p>A new panel with a finder: a small live picture of the shared window that turns from grey to colour when the share starts, with a sweeping line and a dot where your assistant clicks while it works. A minimized window comes back behind your other windows when your assistant asks for it, on X11.</p>
       </description>
       <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.2.0</url>
-    </release>
-    <release version="1.1.2" date="2026-11-15">
-      <description>
-        <p>The pinboard has a full button with its name on it, beside the info button.</p>
-      </description>
-      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.1.2</url>
-    </release>
-    <release version="1.1.1" date="2026-11-15">
-      <description>
-        <p>A minimized window comes back behind your other windows when your assistant asks for it, on X11 as on Windows and macOS.</p>
-      </description>
-      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.1.1</url>
     </release>
     <release version="1.1.0" date="2026-11-15">
       <description>
