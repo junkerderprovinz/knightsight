@@ -121,11 +121,12 @@ class Desk:
 
     def __init__(self, panel):
         self.panel = panel
-        # The panel's thread and the request thread each get their own connection.
+        # The panel's thread, the request thread and the finder's pictures each get their own connection.
         self.ui = xlib.Display()
         self.work = xlib.Display()
         self.uiw = Windows(self.ui)
         self.workw = Windows(self.work)
+        self.peekw = Windows(xlib.Display())
         self.was_down = False
         self.polling = 0
         self.redirected = 0
@@ -321,6 +322,12 @@ class Desk:
             time.sleep(0.04)
         return self._region_shot(share.region, self.ui)
 
+    def preview(self, share):
+        """The share for the panel's finder, with whatever lies over a region left in."""
+        if share.window:
+            return self._window_shot(share.window, self.peekw)
+        return self._region_shot(share.region, self.peekw.x)
+
     @staticmethod
     def _region_shot(r, x):
         pixels = x.image(x.root, r.x, r.y, r.width, r.height)
@@ -389,11 +396,14 @@ class Desk:
         shot.mark_dirty()
         return shot
 
-    def _point(self, share, args):
+    def _area(self, share):
         area = self.workw.bounds(share.window) if share.window else share.region
         if area is None:
             raise Refused("The shared window has no size right now.")
-        return protocol.to_area(area, args)
+        return area
+
+    def _point(self, share, args):
+        return protocol.to_area(self._area(share), args)
 
     def _root_for(self, share, x, y):
         if share.window:
@@ -462,9 +472,11 @@ class Desk:
             time.sleep(0.03)
 
     def click(self, share, args):
-        x, y = self._point(share, args)
+        area = self._area(share)
+        x, y = protocol.to_area(area, args)
         w = self._root_for(share, x, y)
         right, twice = protocol.flag(args, "right"), protocol.flag(args, "double")
+        self.panel.clicked(area, x, y)
         self.panel.busy()
 
         def act():

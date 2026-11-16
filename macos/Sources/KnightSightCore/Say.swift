@@ -13,8 +13,11 @@ public struct Say {
     private func pick(_ english: String, _ deutsch: String) -> String { german ? deutsch : english }
 
     public var untitled: String { pick("Untitled window", "Fenster ohne Titel") }
-    public var pickWindow: String { pick("Choose window", "Fenster wählen") }
-    public var pickRegion: String { pick("Choose region", "Bereich wählen") }
+    public var pickWindow: String { pick("Window", "Fenster") }
+    public var pickRegion: String { pick("Region", "Bereich") }
+    public var pickWindowTip: String { pick("Choose the window to share", "Fenster zum Freigeben wählen") }
+    public var pickRegionTip: String { pick("Choose a region of the screen", "Bereich des Bildschirms wählen") }
+    public var noTarget: String { pick("No target", "Kein Ziel") }
     public var startShare: String { pick("Start sharing", "Freigabe starten") }
     public var stopShare: String { pick("Stop sharing", "Freigabe beenden") }
     public var quit: String { pick("Quit KnightSight", "KnightSight beenden") }

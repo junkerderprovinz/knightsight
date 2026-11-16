@@ -30,6 +30,7 @@ final class Panel: NSObject, NSWindowDelegate {
     private var frameColor = Theme.neutral
     private var last = Date()
     private var lastPermissionCheck = Date.distantPast
+    private var previewDue = Date.distantPast, previewBusy = false
     private var notice: String?
     private var sentRound = 0
 
@@ -109,11 +110,15 @@ final class Panel: NSObject, NSWindowDelegate {
     private func showState() {
         let active = session.active
         view.show(headline(), subline())
+        view.chosen = session.chosen != nil
+        view.shared = active
+        view.working = working
         view.pickWindow.isEnabled = !active
         view.pickRegion.isEnabled = !active
         view.toggle.isEnabled = session.chosen != nil
         view.toggle.title = active ? say.stopShare : say.startShare
         view.toggle.glyph = active ? .stop : .start
+        view.toggle.outline = active
         view.pin.isEnabled = active
         hotkey?.pinboardKey = active
         view.pin.filled = pinboard.isOpen ? Theme.accent : nil
@@ -159,6 +164,8 @@ final class Panel: NSObject, NSWindowDelegate {
         if session.chosen.map({ $0.window != chosen.window || $0.region != chosen.region }) ?? true { board.clear() }
         session.chosen = chosen
         notice = nil
+        view.preview = nil
+        previewDue = .distantPast
     }
 
     // macOS asks the person itself, the first time an app wants a permission.
@@ -269,6 +276,7 @@ final class Panel: NSObject, NSWindowDelegate {
         }
         view.dotColor = !active ? Theme.neutral : working ? Motion.mix(Theme.accent, Theme.warning, pulse) : Theme.accent
         view.halo = working && Motion.on ? pulse : 0
+        view.click = session.lastClick
 
         guard let chosen = session.chosen else { return hideMarks() }
         var shared: WindowInfo?
@@ -285,6 +293,7 @@ final class Panel: NSObject, NSWindowDelegate {
             shared = w
             area = w.bounds
         }
+        refreshPreview(chosen, area: area, now: now)
 
         var width: CGFloat = 3
         let target: NSColor
@@ -312,6 +321,22 @@ final class Panel: NSObject, NSWindowDelegate {
         }
         if pinboard.isOpen { pinboard.follow(area) }
         stack(on: shared)
+    }
+
+    // Picturing a busy window takes a moment, so the finder's picture is taken off the main thread.
+    private func refreshPreview(_ chosen: Chosen, area: CGRect, now: Date) {
+        guard now >= previewDue, !previewBusy else { return }
+        previewDue = now.addingTimeInterval(1)
+        previewBusy = true
+        let room = view.viewfinder, fit = min(room.width / area.width, room.height / area.height) * window.backingScaleFactor
+        let size = CGSize(width: max(1, (area.width * fit).rounded()), height: max(1, (area.height * fit).rounded()))
+        DispatchQueue.global(qos: .utility).async { [self] in
+            let shot = try? desk.picture(size: size).image
+            DispatchQueue.main.async { [self] in
+                previewBusy = false
+                if let shot, session.chosen === chosen { view.preview = shot }
+            }
+        }
     }
 
     private func hideMarks() {
@@ -352,20 +377,42 @@ final class Panel: NSObject, NSWindowDelegate {
 }
 
 final class PanelView: NSView {
-    static let width: CGFloat = 580, height: CGFloat = 212, bar: CGFloat = 40, gutter: CGFloat = 16
+    static let width: CGFloat = 600, height: CGFloat = 244, bar: CGFloat = 40, gutter: CGFloat = 16, finderWidth: CGFloat = 176
 
     let pickWindow: SoftButton, pickRegion: SoftButton, toggle: SoftButton, pin: SoftButton, info: SoftButton
     private(set) var headline = "", subline = ""
     private var oldHeadline = "", oldSubline = ""
     private var swap = 1.0
     private var logo: (pixels: Int, image: NSImage)?
+    private let noTarget: String
 
     var dotColor = Theme.neutral { didSet { if dotColor != oldValue { needsDisplay = true } } }
     var halo: CGFloat = 0 { didSet { if halo != oldValue { needsDisplay = true } } }
 
+    var chosen = false { didSet { if chosen != oldValue { setNeedsDisplay(finder) } } }
+    var shared = false
+    var working = false
+    var click: (spot: CGPoint, at: Date)?
+    var preview: CGImage? {
+        didSet {
+            pictures = preview.map { (colour: NSImage(cgImage: $0, size: .zero), grey: NSImage(cgImage: PanelView.grey($0), size: .zero)) }
+            setNeedsDisplay(finder)
+        }
+    }
+    private var pictures: (colour: NSImage, grey: NSImage)?
+    // The finder's corners stand wide and breathe until the share starts, then snap in close.
+    private var lit = 0.0, corners = 14.0, cornerSpeed = 0.0
+
     var card: CGRect {
         CGRect(x: PanelView.gutter, y: PanelView.bar, width: PanelView.width - 2 * PanelView.gutter, height: PanelView.height - PanelView.bar - PanelView.gutter)
     }
+
+    var finder: CGRect {
+        let card = self.card
+        return CGRect(x: card.minX + 16, y: card.minY + 16, width: PanelView.finderWidth, height: card.height - 32)
+    }
+
+    var viewfinder: CGRect { finder.insetBy(dx: 14, dy: 14) }
 
     init(say: Say) {
         pickWindow = SoftButton(say.pickWindow, glyph: .window)
@@ -373,17 +420,23 @@ final class PanelView: NSView {
         toggle = SoftButton(say.startShare, glyph: .start, kind: .primary)
         pin = SoftButton(say.pinboard, glyph: .pin)
         info = SoftButton("", glyph: .info)
+        noTarget = say.noTarget
         super.init(frame: CGRect(x: 0, y: 0, width: PanelView.width, height: PanelView.height))
         let card = self.card
-        let buttonsY = card.maxY - 20 - 40
-        pickWindow.frame = CGRect(x: card.minX + 20, y: buttonsY + 2, width: 148, height: 36)
-        pickRegion.frame = CGRect(x: card.minX + 176, y: buttonsY + 2, width: 148, height: 36)
-        toggle.frame = CGRect(x: card.maxX - 20 - 176, y: buttonsY, width: 176, height: 40)
-        info.frame = CGRect(x: card.maxX - 20 - 28, y: card.minY + 18, width: 28, height: 28)
+        let side = finder.maxX + 18, sideWidth = card.maxX - 16 - side
+        let small = (sideWidth - 16) / 3, rowY = card.maxY - 16 - 48 - 8 - 36
+        pickWindow.frame = CGRect(x: side, y: rowY, width: small, height: 36)
+        pickRegion.frame = CGRect(x: side + small + 8, y: rowY, width: small, height: 36)
+        pin.frame = CGRect(x: side + 2 * (small + 8), y: rowY, width: small, height: 36)
+        toggle.frame = CGRect(x: side, y: card.maxY - 16 - 48, width: sideWidth, height: 48)
+        toggle.radius = 10
+        toggle.label = Theme.semiBold(15)
+        info.frame = CGRect(x: card.maxX - 28, y: (PanelView.bar - 28) / 2, width: 28, height: 28)
         info.radius = 14
         info.toolTip = say.help
         info.setAccessibilityLabel(say.help)
-        pin.frame = CGRect(x: info.frame.minX - 10 - 124, y: card.minY + 16, width: 124, height: 32)
+        pickWindow.toolTip = say.pickWindowTip
+        pickRegion.toolTip = say.pickRegionTip
         pin.toolTip = say.pinboardTip
         pin.setAccessibilityLabel(say.pinboardTip)
         for button in [pickWindow, pickRegion, toggle, pin, info] { addSubview(button) }
@@ -413,9 +466,23 @@ final class PanelView: NSView {
     }
 
     func advance(_ elapsed: Double) {
-        guard swap < 1 else { return }
-        swap = Motion.step(swap, to: 1, elapsed: elapsed, duration: Motion.content)
-        needsDisplay = true
+        if swap < 1 {
+            swap = Motion.step(swap, to: 1, elapsed: elapsed, duration: Motion.content)
+            needsDisplay = true
+        }
+        let moving = Motion.on, litTo: Double = shared ? 1 : 0
+        let breathe = moving ? 0.5 - 0.5 * cos(2 * .pi * Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 2.4) / 2.4) : 0
+        let cornersTo = shared ? 6 : 14 + 6 * breathe
+        if moving || lit != litTo { setNeedsDisplay(finder) }
+        lit = Motion.step(lit, to: litTo, elapsed: elapsed, duration: Motion.content)
+        if moving {
+            // A spring, so the corners overshoot a little as they lock on.
+            let dt = min(elapsed, 50) / 1000
+            cornerSpeed += ((cornersTo - corners) * 260 - cornerSpeed * 20) * dt
+            corners += cornerSpeed * dt
+        } else {
+            corners = cornersTo
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -425,44 +492,118 @@ final class PanelView: NSView {
         Theme.surface.setFill()
         NSBezierPath(roundedRect: card, xRadius: 10, yRadius: 10).fill()
 
-        let spot = CGRect(x: card.minX + 20, y: card.minY + 18, width: 52, height: 52)
-        logoImage().draw(in: spot, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        let textX = spot.maxX + 16
-        let area = CGRect(x: textX, y: card.minY + 20, width: pin.frame.minX - 12 - textX, height: 48)
+        let finder = self.finder
+        drawFinder(finder)
+        let side = finder.maxX + 18, sideWidth = card.maxX - 16 - side
+        logoImage().draw(in: CGRect(x: side, y: card.minY + 16, width: 28, height: 28), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        let head = CGRect(x: side + 38, y: card.minY + 19, width: sideWidth - 38, height: 24)
+        let sub = CGRect(x: side + 16, y: card.minY + 52, width: sideWidth - 16, height: 20)
 
         // The state dot: grey until shared, accent while shared, pulsing while work goes on.
-        let d: CGFloat = 8, dy = area.minY + 26 + 10
+        let d: CGFloat = 8, mx = side, my = sub.minY + 10
         if halo > 0 {
             Theme.warning.withAlphaComponent(80 / 255 * halo).setFill()
-            NSBezierPath(ovalIn: CGRect(x: area.minX + d / 2 - d, y: dy - d, width: d * 2, height: d * 2)).fill()
+            NSBezierPath(ovalIn: CGRect(x: mx + d / 2 - d, y: my - d, width: d * 2, height: d * 2)).fill()
         }
         dotColor.setFill()
-        NSBezierPath(ovalIn: CGRect(x: area.minX, y: dy - d / 2, width: d, height: d)).fill()
+        NSBezierPath(ovalIn: CGRect(x: mx, y: my - d / 2, width: d, height: d)).fill()
 
         let t = CGFloat(Motion.ease(swap)), shift: CGFloat = 6
-        if t < 1 { texts(area, oldHeadline, oldSubline, alpha: 1 - t, dy: -shift * t) }
-        texts(area, headline, subline, alpha: t, dy: shift * (1 - t))
+        if t < 1 { texts(head, sub, oldHeadline, oldSubline, alpha: 1 - t, dy: -shift * t) }
+        texts(head, sub, headline, subline, alpha: t, dy: shift * (1 - t))
     }
 
-    private func texts(_ area: CGRect, _ head: String, _ sub: String, alpha: CGFloat, dy: CGFloat) {
+    // The finder shows the share itself, grey while it is only chosen and in colour once it is
+    // shared. A line sweeps over it while the assistant works, and a dot marks its last click.
+    private func drawFinder(_ finder: CGRect) {
+        (Theme.dark ? Theme.rgb(18, 17, 16) : Theme.surface2).setFill()
+        NSBezierPath(roundedRect: finder, xRadius: 10, yRadius: 10).fill()
+        let view = viewfinder, t = CGFloat(Motion.ease(lit))
+        if !chosen {
+            let attributes: [NSAttributedString.Key: Any] = [.font: Theme.regular(13), .foregroundColor: Theme.muted]
+            let size = noTarget.size(withAttributes: attributes)
+            noTarget.draw(at: CGPoint(x: finder.midX - size.width / 2, y: finder.midY - size.height / 2), withAttributes: attributes)
+        } else if let pictures {
+            let shot = pictures.colour.size
+            let fit = min(view.width / shot.width, view.height / shot.height) * (0.94 + 0.06 * t)
+            let at = CGRect(x: view.midX - shot.width * fit / 2, y: view.midY - shot.height * fit / 2, width: shot.width * fit, height: shot.height * fit)
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(roundedRect: at, xRadius: 5, yRadius: 5).addClip()
+            // Colour over grey in one layer, so the layer fades as a whole.
+            let context = NSGraphicsContext.current!.cgContext
+            context.saveGState()
+            context.setAlpha(0.55 + 0.45 * t)
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+            pictures.grey.draw(in: at, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            pictures.colour.draw(in: at, from: .zero, operation: .sourceOver, fraction: t, respectFlipped: true, hints: nil)
+            context.endTransparencyLayer()
+            context.restoreGState()
+            if working && Motion.on { drawWork(at) }
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        let box = finder.insetBy(dx: corners, dy: corners), arm: CGFloat = 16
+        let brackets = NSBezierPath()
+        let ends: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [(box.minX, box.minY, 1, 1), (box.maxX, box.minY, -1, 1), (box.minX, box.maxY, 1, -1), (box.maxX, box.maxY, -1, -1)]
+        for (x, y, sx, sy) in ends {
+            brackets.move(to: CGPoint(x: x, y: y + sy * arm))
+            brackets.line(to: CGPoint(x: x, y: y))
+            brackets.line(to: CGPoint(x: x + sx * arm, y: y))
+        }
+        brackets.lineWidth = 2
+        brackets.lineCapStyle = .round
+        brackets.lineJoinStyle = .round
+        Motion.mix(Theme.muted, Theme.accent, t).setStroke()
+        brackets.stroke()
+    }
+
+    private func drawWork(_ at: CGRect) {
+        let now = Date()
+        let sweep = CGFloat(now.timeIntervalSince1970.truncatingRemainder(dividingBy: 1.6) / 1.6)
+        let alpha = 230 / 255 * min(1, min(sweep, 1 - sweep) * 6)
+        let line = NSGradient(colors: [Theme.accent.withAlphaComponent(0), Theme.accent.withAlphaComponent(alpha), Theme.accent.withAlphaComponent(0)])
+        line?.draw(in: CGRect(x: at.minX, y: at.minY + at.height * sweep - 1, width: at.width, height: 2), angle: 0)
+
+        guard let click else { return }
+        let age = now.timeIntervalSince(click.at) * 1000
+        guard age <= 2500 else { return }
+        let cx = at.minX + at.width * click.spot.x, cy = at.minY + at.height * click.spot.y, d: CGFloat = 8
+        Theme.warning.setFill()
+        NSBezierPath(ovalIn: CGRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d)).fill()
+        if age < 600 {
+            let ring = d / 2 + 10 * CGFloat(age / 600)
+            let path = NSBezierPath(ovalIn: CGRect(x: cx - ring, y: cy - ring, width: ring * 2, height: ring * 2))
+            path.lineWidth = 2
+            Theme.warning.withAlphaComponent(150 / 255 * CGFloat(1 - age / 600)).setStroke()
+            path.stroke()
+        }
+    }
+
+    private static func grey(_ image: CGImage) -> CGImage {
+        let context = CGContext(
+            data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()!
+    }
+
+    private func texts(_ head: CGRect, _ sub: CGRect, _ headText: String, _ subText: String, alpha: CGFloat, dy: CGFloat) {
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
-        let indent: CGFloat = 16
-        head.draw(
-            with: CGRect(x: area.minX, y: area.minY + dy, width: area.width, height: 24),
+        headText.draw(
+            with: head.offsetBy(dx: 0, dy: dy),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
             attributes: [.font: Theme.semiBold(16), .foregroundColor: Theme.text.withAlphaComponent(alpha), .paragraphStyle: style])
-        // The subline sits below the pinboard button, so it may run on up to the info button.
-        sub.draw(
-            with: CGRect(x: area.minX + indent, y: area.minY + 26 + dy, width: info.frame.minX - 12 - area.minX - indent, height: 20),
+        subText.draw(
+            with: sub.offsetBy(dx: 0, dy: dy),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
             attributes: [.font: Theme.regular(13), .foregroundColor: Theme.secondary.withAlphaComponent(alpha), .paragraphStyle: style])
     }
 
     private func logoImage() -> NSImage {
-        let pixels = Int((52 * (window?.backingScaleFactor ?? 2)).rounded())
+        let pixels = Int((28 * (window?.backingScaleFactor ?? 2)).rounded())
         if let logo, logo.pixels == pixels { return logo.image }
-        let image = NSImage(cgImage: Logo.render(pixels), size: CGSize(width: 52, height: 52))
+        let image = NSImage(cgImage: Logo.render(pixels), size: CGSize(width: 28, height: 28))
         logo = (pixels, image)
         return image
     }

@@ -106,8 +106,11 @@ namespace KnightSight
         static string Pick(string english, string deutsch) { return german ? deutsch : english; }
 
         public static readonly string Untitled = Pick("Untitled window", "Fenster ohne Titel");
-        public static readonly string PickWindow = Pick("Choose window", "Fenster wählen");
-        public static readonly string PickRegion = Pick("Choose region", "Bereich wählen");
+        public static readonly string PickWindow = Pick("Window", "Fenster");
+        public static readonly string PickRegion = Pick("Region", "Bereich");
+        public static readonly string PickWindowTip = Pick("Choose the window to share", "Fenster zum Freigeben wählen");
+        public static readonly string PickRegionTip = Pick("Choose a region of the screen", "Bereich des Bildschirms wählen");
+        public static readonly string NoTarget = Pick("No target", "Kein Ziel");
         public static readonly string StartShare = Pick("Start sharing", "Freigabe starten");
         public static readonly string StopShare = Pick("Stop sharing", "Freigabe beenden");
         public static readonly string Close = Pick("Close", "Schließen");
@@ -939,7 +942,7 @@ namespace KnightSight
         public static readonly Color AccentHover = Color.FromArgb(253, 214, 94);
         public static readonly Color AccentInk = Color.FromArgb(22, 22, 22);
         public static readonly Color Warning = Color.FromArgb(255, 131, 43);
-        public static readonly Color Neutral = Color.FromArgb(141, 141, 141);
+        public static readonly Color Neutral = Color.FromArgb(141, 136, 128);
 
         public static bool Dark;
         public static Color Ground, Surface, Surface2, Surface3, Hover, Text, Secondary, Muted;
@@ -950,14 +953,14 @@ namespace KnightSight
         {
             var v = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1);
             Dark = v is int && (int)v == 0;
-            Ground = Dark ? Color.FromArgb(22, 22, 22) : Color.FromArgb(244, 244, 244);
-            Surface = Dark ? Color.FromArgb(38, 38, 38) : Color.White;
-            Surface2 = Dark ? Color.FromArgb(57, 57, 57) : Color.FromArgb(232, 232, 232);
-            Surface3 = Dark ? Color.FromArgb(82, 82, 82) : Color.FromArgb(209, 209, 209);
-            Hover = Dark ? Color.FromArgb(53, 53, 53) : Color.FromArgb(224, 224, 224);
-            Text = Dark ? Color.FromArgb(244, 244, 244) : Color.FromArgb(22, 22, 22);
-            Secondary = Dark ? Color.FromArgb(198, 198, 198) : Color.FromArgb(82, 82, 82);
-            Muted = Dark ? Color.FromArgb(141, 141, 141) : Color.FromArgb(111, 111, 111);
+            Ground = Dark ? Color.FromArgb(15, 14, 12) : Color.FromArgb(245, 243, 239);
+            Surface = Dark ? Color.FromArgb(28, 26, 23) : Color.White;
+            Surface2 = Dark ? Color.FromArgb(52, 48, 43) : Color.FromArgb(233, 230, 224);
+            Surface3 = Dark ? Color.FromArgb(78, 73, 66) : Color.FromArgb(210, 205, 197);
+            Hover = Dark ? Color.FromArgb(46, 43, 38) : Color.FromArgb(225, 221, 214);
+            Text = Dark ? Color.FromArgb(240, 236, 228) : Color.FromArgb(24, 22, 19);
+            Secondary = Dark ? Color.FromArgb(190, 184, 173) : Color.FromArgb(86, 81, 73);
+            Muted = Dark ? Color.FromArgb(140, 134, 124) : Color.FromArgb(115, 109, 100);
 
             foreach (var name in new[] { "NotoSans-Regular.ttf", "NotoSans-SemiBold.ttf" })
             {
@@ -1114,7 +1117,7 @@ namespace KnightSight
     // Hover fades in and a press sinks it a little, both as transitions over Motion.Control.
     class SoftButton : Control
     {
-        public bool Primary, Blank;
+        public bool Primary, Blank, Outline;
         public Color Fill = Color.Empty;
         public float Square;
         public Color Under;
@@ -1178,6 +1181,7 @@ namespace KnightSight
             if (Blank) { fill = Motion.Mix(Under, Theme.Hover, t); ink = Motion.Mix(Theme.Secondary, Theme.Text, t); }
             else if (!Enabled) { fill = Theme.Surface2; ink = Theme.Muted; }
             else if (!Fill.IsEmpty) { fill = Motion.Mix(Fill, Color.White, 0.2f * t); ink = Theme.AccentInk; }
+            else if (Outline) { fill = Motion.Mix(Theme.Surface2, Theme.Surface3, t); ink = Theme.Text; }
             else if (Primary) { fill = Motion.Mix(Theme.Accent, Theme.AccentHover, t); ink = Theme.AccentInk; }
             else { fill = Motion.Mix(Theme.Surface2, Theme.Surface3, t); ink = Theme.Text; }
             float scale = 1 - (1 - Motion.PressScale) * Motion.Ease(sink);
@@ -1186,6 +1190,8 @@ namespace KnightSight
             using (var path = Theme.Rounded(r, Radius * scale))
             {
                 using (var brush = new SolidBrush(fill)) g.FillPath(brush, path);
+                if (Outline && Enabled)
+                    using (var edge = new Pen(Theme.Accent, 1.5f * K)) g.DrawPath(edge, path);
                 if (Focused && ShowFocusCues)
                     using (var ring = new Pen(Theme.Accent, 2 * K)) g.DrawPath(ring, path);
             }
@@ -2343,7 +2349,7 @@ namespace KnightSight
     public class Panel : Card
     {
         const int MaxEdge = 1568, Port = 47613;
-        const float PanelWidth = 580, PanelHeight = 212, BarHeight = 40, Gutter = 16;
+        const float PanelWidth = 600, PanelHeight = 244, BarHeight = 40, Gutter = 16, FinderWidth = 176;
         // A request less than this long ago counts as work in progress: frame and badge stay lit
         // through the pauses between the steps of one task.
         static readonly long WorkSpan = TimeSpan.FromSeconds(5).Ticks;
@@ -2355,7 +2361,7 @@ namespace KnightSight
         readonly Hotkeys hotkeys;
         readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer { Interval = 15 };
         readonly SoftButton pickWindow = new SoftButton { Icon = Glyph.Window }, pickRegion = new SoftButton { Icon = Glyph.Region },
-            toggle = new SoftButton { Primary = true, Icon = Glyph.Start }, info = new SoftButton { Icon = Glyph.Info },
+            toggle = new SoftButton { Primary = true, Icon = Glyph.Start }, info = new SoftButton { Blank = true, Icon = Glyph.Info },
             minimise = new SoftButton { Blank = true, Icon = Glyph.Minimise }, close = new SoftButton { Blank = true, Icon = Glyph.Close },
             pin = new SoftButton { Icon = Glyph.Pin };
         readonly Board board = new Board();
@@ -2375,6 +2381,14 @@ namespace KnightSight
         bool picking, buttonWasDown, working, fetchedShown;
         // What the panel says about the notes sent last, until the share ends.
         string sentNote;
+        // The finder's picture of the share, refreshed about once a second, and where its corners
+        // stand: wide and breathing until the share starts, then snapped in close.
+        Bitmap preview;
+        long previewDue, clickTicks;
+        int previewBusy;
+        float corners = 14, cornerSpeed, lit, clickX, clickY;
+
+        RectangleF Finder { get { var c = Card; return new RectangleF(c.X + S(16), c.Y + S(16), S(FinderWidth), c.Height - S(32)); } }
 
         RectangleF Card { get { return new RectangleF(S(Gutter), S(BarHeight), S(PanelWidth - 2 * Gutter), S(PanelHeight - BarHeight - Gutter)); } }
 
@@ -2410,18 +2424,20 @@ namespace KnightSight
             badge = new Badge(k);
 
             var card = Card;
-            float buttonsY = card.Bottom - S(20) - S(40);
-            Place(pickWindow, Say.PickWindow, buttonFont, card.X + S(20), buttonsY + S(2), S(148), S(36));
-            Place(pickRegion, Say.PickRegion, buttonFont, card.X + S(176), buttonsY + S(2), S(148), S(36));
-            Place(toggle, Say.StartShare, buttonFont, card.Right - S(20) - S(176), buttonsY, S(176), S(40));
-            Place(info, "", buttonFont, card.Right - S(20) - S(28), card.Y + S(18), S(28), S(28));
-            info.Radius = S(14);
-            Place(pin, Say.Pinboard, buttonFont, info.Left - S(10) - S(124), card.Y + S(16), S(124), S(32));
+            float side = Finder.Right + S(18), sideWidth = card.Right - S(16) - side;
+            float small = (sideWidth - S(16)) / 3, rowY = card.Bottom - S(16) - S(48) - S(8) - S(36);
+            Place(pickWindow, Say.PickWindow, buttonFont, side, rowY, small, S(36));
+            Place(pickRegion, Say.PickRegion, buttonFont, side + small + S(8), rowY, small, S(36));
+            Place(pin, Say.Pinboard, buttonFont, side + 2 * (small + S(8)), rowY, small, S(36));
+            Place(toggle, Say.StartShare, new Font(Theme.SemiBold, S(15), GraphicsUnit.Pixel), side, card.Bottom - S(16) - S(48), sideWidth, S(48));
+            toggle.Radius = S(10);
+            tip.SetToolTip(pickWindow, Say.PickWindowTip);
+            tip.SetToolTip(pickRegion, Say.PickRegionTip);
             tip.SetToolTip(pin, Say.PinboardTip);
             info.Cursor = Cursors.Help;
             PlaceOnBar(close, Say.Close, PanelWidth - 44);
             PlaceOnBar(minimise, Say.Minimise, PanelWidth - 88);
-            tip.SetToolTip(info, Say.Help);
+            PlaceOnBar(info, Say.Help, PanelWidth - 132);
             tip.Popup += (o, e) =>
             {
                 using (var g = CreateGraphics())
@@ -2500,35 +2516,147 @@ namespace KnightSight
             using (var brush = new SolidBrush(Theme.Surface))
                 g.FillPath(brush, path);
 
-            float logo = S(52);
-            Logo.Draw(g, card.X + S(20), card.Y + S(18), logo);
-            float textX = card.X + S(20) + logo + S(16);
-            var area = new RectangleF(textX, card.Y + S(20), pin.Left - S(12) - textX, S(48));
+            var finder = Finder;
+            DrawFinder(g, finder);
+            float side = finder.Right + S(18), sideWidth = card.Right - S(16) - side;
+            Logo.Draw(g, side, card.Y + S(16), S(28));
+            var head = new RectangleF(side + S(38), card.Y + S(19), sideWidth - S(38), S(24));
+            var sub = new RectangleF(side + S(16), card.Y + S(52), sideWidth - S(16), S(20));
             // The state dot: grey until shared, accent while shared, pulsing while work goes on.
-            float d = S(8), dy = area.Y + S(26) + S(10);
+            float d = S(8), mx = side, my = sub.Y + S(10);
             if (working && Motion.Control > 0)
                 using (var halo = new SolidBrush(Color.FromArgb((int)(80 * pulse), Theme.Warning)))
-                    g.FillEllipse(halo, area.X + d / 2 - d, dy - d, d * 2, d * 2);
+                    g.FillEllipse(halo, mx + d / 2 - d, my - d, d * 2, d * 2);
             using (var brush = new SolidBrush(dotColor))
-                g.FillEllipse(brush, area.X, dy - d / 2, d, d);
+                g.FillEllipse(brush, mx, my - d / 2, d, d);
             // A new text slides up into place while the old one fades out above it.
             float t = Motion.Ease(swap), shift = S(6);
-            if (t < 1) Texts(g, area, oldHeadline, oldSubline, 1 - t, -shift * t);
-            Texts(g, area, headline, subline, t, shift * (1 - t));
+            if (t < 1) Texts(g, head, sub, oldHeadline, oldSubline, 1 - t, -shift * t);
+            Texts(g, head, sub, headline, subline, t, shift * (1 - t));
         }
 
-        void Texts(Graphics g, RectangleF area, string head, string sub, float alpha, float dy)
+        // The finder shows the share itself, grey while it is only chosen and in colour once it is
+        // shared. A line sweeps over it while the assistant works, and a dot marks its last click.
+        void DrawFinder(Graphics g, RectangleF finder)
+        {
+            using (var path = Theme.Rounded(finder, S(10)))
+            using (var brush = new SolidBrush(Theme.Dark ? Color.FromArgb(18, 17, 16) : Theme.Surface2))
+                g.FillPath(brush, path);
+            var view = RectangleF.Inflate(finder, -S(14), -S(14));
+            float t = Motion.Ease(lit);
+            var shot = preview;
+            if (chosen == null)
+                using (var brush = new SolidBrush(Theme.Muted))
+                using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                    g.DrawString(Say.NoTarget, bodyFont, brush, finder, format);
+            else if (shot != null)
+            {
+                float fit = Math.Min(view.Width / shot.Width, view.Height / shot.Height) * (0.94f + 0.06f * t);
+                var at = new RectangleF(view.X + (view.Width - shot.Width * fit) / 2, view.Y + (view.Height - shot.Height * fit) / 2, shot.Width * fit, shot.Height * fit);
+                float grey = 1 - t, a = 0.55f + 0.45f * t;
+                var matrix = new ColorMatrix(new[] {
+                    new[] { t + grey * 0.30f, grey * 0.30f, grey * 0.30f, 0, 0 },
+                    new[] { grey * 0.59f, t + grey * 0.59f, grey * 0.59f, 0, 0 },
+                    new[] { grey * 0.11f, grey * 0.11f, t + grey * 0.11f, 0, 0 },
+                    new[] { 0f, 0, 0, a, 0 },
+                    new[] { 0f, 0, 0, 0, 1 } });
+                using (var clip = Theme.Rounded(at, S(5)))
+                using (var attributes = new ImageAttributes())
+                {
+                    attributes.SetColorMatrix(matrix);
+                    var saved = g.Clip;
+                    g.SetClip(clip, CombineMode.Intersect);
+                    g.DrawImage(shot, Rectangle.Round(at), 0, 0, shot.Width, shot.Height, GraphicsUnit.Pixel, attributes);
+                    if (working && Motion.Control > 0) DrawWork(g, at);
+                    g.Clip = saved;
+                }
+            }
+            var box = RectangleF.Inflate(finder, -S(corners), -S(corners));
+            float arm = S(16);
+            using (var pen = new Pen(Motion.Mix(Theme.Muted, Theme.Accent, t), S(2)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                foreach (var c in new[] { new PointF(box.Left, box.Top), new PointF(box.Right, box.Top), new PointF(box.Left, box.Bottom), new PointF(box.Right, box.Bottom) })
+                {
+                    float sx = c.X == box.Left ? 1 : -1, sy = c.Y == box.Top ? 1 : -1;
+                    g.DrawLines(pen, new[] { new PointF(c.X, c.Y + sy * arm), c, new PointF(c.X + sx * arm, c.Y) });
+                }
+        }
+
+        void DrawWork(Graphics g, RectangleF at)
+        {
+            float sweep = DateTime.UtcNow.Ticks / 10000 % 1600 / 1600f, y = at.Y + at.Height * sweep;
+            int alpha = (int)(230 * Math.Min(1, Math.Min(sweep, 1 - sweep) * 6));
+            var line = new RectangleF(at.X, y - S(1), at.Width, S(2));
+            using (var brush = new LinearGradientBrush(new RectangleF(line.X - 1, line.Y, line.Width + 2, line.Height), Color.Transparent, Color.Transparent, LinearGradientMode.Horizontal))
+            {
+                brush.InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { Color.FromArgb(0, Theme.Accent), Color.FromArgb(alpha, Theme.Accent), Color.FromArgb(0, Theme.Accent) },
+                    Positions = new[] { 0f, 0.5f, 1f },
+                };
+                g.FillRectangle(brush, line);
+            }
+            float age = (DateTime.UtcNow.Ticks - Interlocked.Read(ref clickTicks)) / 10000f;
+            if (age > 2500) return;
+            float cx = at.X + at.Width * clickX, cy = at.Y + at.Height * clickY, d = S(8);
+            using (var brush = new SolidBrush(Theme.Warning)) g.FillEllipse(brush, cx - d / 2, cy - d / 2, d, d);
+            if (age < 600)
+            {
+                float ring = d / 2 + S(10) * age / 600;
+                using (var pen = new Pen(Color.FromArgb((int)(150 * (1 - age / 600)), Theme.Warning), S(2)))
+                    g.DrawEllipse(pen, cx - ring, cy - ring, ring * 2, ring * 2);
+            }
+        }
+
+        // The picture is taken off the panel's thread, since printing a busy window takes a moment.
+        void RefreshPreview(Share share, long now)
+        {
+            if (now < previewDue || Interlocked.CompareExchange(ref previewBusy, 1, 0) != 0) return;
+            previewDue = now + TimeSpan.TicksPerSecond;
+            var view = RectangleF.Inflate(Finder, -S(14), -S(14));
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                Bitmap small = null;
+                try
+                {
+                    using (var shot = share.Window != IntPtr.Zero ? CaptureWindow(share.Window) : CaptureRegion(share.Area))
+                    {
+                        float fit = Math.Min(view.Width / shot.Width, view.Height / shot.Height);
+                        small = new Bitmap(Math.Max(1, (int)(shot.Width * fit)), Math.Max(1, (int)(shot.Height * fit)));
+                        using (var g = Graphics.FromImage(small))
+                        {
+                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            g.DrawImage(shot, 0, 0, small.Width, small.Height);
+                        }
+                    }
+                }
+                catch (Refused) { }
+                catch (ArgumentException) { }
+                catch (ExternalException) { }
+                if (IsDisposed) { if (small != null) small.Dispose(); return; }
+                BeginInvoke((MethodInvoker)(() =>
+                {
+                    previewBusy = 0;
+                    if (small == null) return;
+                    if (chosen != share) { small.Dispose(); return; }
+                    var old = preview;
+                    preview = small;
+                    if (old != null) old.Dispose();
+                    Invalidate(Rectangle.Ceiling(Finder));
+                }));
+            });
+        }
+
+        void Texts(Graphics g, RectangleF head, RectangleF sub, string headText, string subText, float alpha, float dy)
         {
             int a = (int)(255 * alpha);
-            float indent = S(16);
             using (var format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
             using (var title = new SolidBrush(Color.FromArgb(a, Theme.Text)))
             using (var body = new SolidBrush(Color.FromArgb(a, Theme.Secondary)))
             {
-                g.DrawString(head, titleFont, title, new RectangleF(area.X, area.Y + dy, area.Width, S(24)), format);
-                // The subline sits below the pinboard button, so it may run on up to the info button.
-                float subWidth = info.Left - S(12) - area.X - indent;
-                g.DrawString(sub, bodyFont, body, new RectangleF(area.X + indent, area.Y + S(26) + dy, subWidth, S(20)), format);
+                head.Offset(0, dy);
+                sub.Offset(0, dy);
+                g.DrawString(headText, titleFont, title, head, format);
+                g.DrawString(subText, bodyFont, body, sub, format);
             }
         }
 
@@ -2566,6 +2694,7 @@ namespace KnightSight
             toggle.Enabled = c != null;
             toggle.Text = active ? Say.StopShare : Say.StartShare;
             toggle.Icon = active ? Glyph.Stop : Glyph.Start;
+            toggle.Outline = active;
             pin.Enabled = active;
             pin.Primary = board.Open;
             pin.Invalidate();
@@ -2617,6 +2746,8 @@ namespace KnightSight
         void Choose(Share share)
         {
             chosen = share;
+            if (preview != null) { preview.Dispose(); preview = null; }
+            previewDue = 0;
             board.Forget();
             pinboard.Hide();
             ShowState();
@@ -2734,7 +2865,19 @@ namespace KnightSight
             else if (working && Say.Doing + doing != shown) ShowState();
             if (sentNote != null && board.Fetched != fetchedShown) { fetchedShown = board.Fetched; ShowState(); }
             var dotTarget = !active ? Theme.Neutral : working ? Motion.Mix(Theme.Accent, Theme.Warning, pulse) : Theme.Accent;
-            if (dotTarget != dotColor) { dotColor = dotTarget; Invalidate(); }
+            if (dotTarget != dotColor || working && moving) { dotColor = dotTarget; Invalidate(); }
+
+            float litTo = active ? 1 : 0, cornersTo = active ? 6 : 14 + 6 * (moving ? 0.5f - 0.5f * (float)Math.Cos(2 * Math.PI * (now.Ticks / 10000 % 2400) / 2400) : 0);
+            lit = Motion.Step(lit, litTo, elapsed, Motion.Content);
+            if (moving)
+            {
+                // A spring, so the corners overshoot a little as they lock on.
+                float dt = Math.Min(elapsed, 50) / 1000;
+                cornerSpeed += ((cornersTo - corners) * 260 - cornerSpeed * 20) * dt;
+                corners += cornerSpeed * dt;
+            }
+            else corners = cornersTo;
+            if (moving || lit != litTo) Invalidate(Rectangle.Ceiling(Finder));
 
             var c = chosen;
             if (c == null) { frame.Hide(); HideBadge(); return; }
@@ -2752,6 +2895,7 @@ namespace KnightSight
                 if (Native.IsIconic(c.Window) || Win.IsCloaked(c.Window)) { frame.Hide(); HideBadge(); pinboard.Conceal(); return; }
             }
 
+            RefreshPreview(c, now.Ticks);
             int width = (int)Math.Round(S(3));
             Color target;
             if (!active) target = Theme.Neutral;
@@ -3129,6 +3273,10 @@ namespace KnightSight
         string ClickAt(Share s, Dictionary<string, object> args)
         {
             var p = ToScreen(s, args);
+            var area = s.Area;
+            clickX = (p.X - area.X) / (float)area.Width;
+            clickY = (p.Y - area.Y) / (float)area.Height;
+            Interlocked.Exchange(ref clickTicks, DateTime.UtcNow.Ticks);
             bool right = Flag(args, "right"), twice = Flag(args, "double");
             var root = RootFor(s, p);
             if (s.Window == IntPtr.Zero) s.Focus = root;

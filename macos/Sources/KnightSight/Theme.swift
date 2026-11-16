@@ -1,22 +1,23 @@
 import AppKit
 import KnightSightCore
 
-/// The GlimStone palette for both appearances, and Noto Sans, which the bundle carries.
+/// The panel's palette for both appearances, warm blacks and whites around the accent, and
+/// Noto Sans, which the bundle carries.
 enum Theme {
     static let accent = rgb(252, 196, 25)
     static let accentHover = rgb(253, 214, 94)
     static let accentInk = rgb(22, 22, 22)
     static let warning = rgb(255, 131, 43)
-    static let neutral = rgb(141, 141, 141)
+    static let neutral = rgb(141, 136, 128)
 
     static var dark: Bool { NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
-    static var ground: NSColor { dark ? rgb(22, 22, 22) : rgb(244, 244, 244) }
-    static var surface: NSColor { dark ? rgb(38, 38, 38) : rgb(255, 255, 255) }
-    static var surface2: NSColor { dark ? rgb(57, 57, 57) : rgb(232, 232, 232) }
-    static var surface3: NSColor { dark ? rgb(82, 82, 82) : rgb(209, 209, 209) }
-    static var text: NSColor { dark ? rgb(244, 244, 244) : rgb(22, 22, 22) }
-    static var secondary: NSColor { dark ? rgb(198, 198, 198) : rgb(82, 82, 82) }
-    static var muted: NSColor { dark ? rgb(141, 141, 141) : rgb(111, 111, 111) }
+    static var ground: NSColor { dark ? rgb(15, 14, 12) : rgb(245, 243, 239) }
+    static var surface: NSColor { dark ? rgb(28, 26, 23) : rgb(255, 255, 255) }
+    static var surface2: NSColor { dark ? rgb(52, 48, 43) : rgb(233, 230, 224) }
+    static var surface3: NSColor { dark ? rgb(78, 73, 66) : rgb(210, 205, 197) }
+    static var text: NSColor { dark ? rgb(240, 236, 228) : rgb(24, 22, 19) }
+    static var secondary: NSColor { dark ? rgb(190, 184, 173) : rgb(86, 81, 73) }
+    static var muted: NSColor { dark ? rgb(140, 134, 124) : rgb(115, 109, 100) }
 
     static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
         NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1)

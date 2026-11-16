@@ -26,6 +26,7 @@ final class Session {
     private var storedPinboard = false
     private var storedFocus: WindowInfo?
     private var storedLent: (front: pid_t, holder: pid_t)?
+    private var storedClick: (spot: CGPoint, at: Date)?
 
     private func locked<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -70,6 +71,13 @@ final class Session {
     var lent: (front: pid_t, holder: pid_t)? {
         get { locked { storedLent } }
         set { locked { storedLent = newValue } }
+    }
+
+    /// The last click asked for, as a fraction of the share's width and height from its top left corner.
+    var lastClick: (spot: CGPoint, at: Date)? { locked { storedClick } }
+
+    func clicked(_ spot: CGPoint) {
+        locked { storedClick = (spot, Date()) }
     }
 
     func began(_ doing: String) {
@@ -146,6 +154,9 @@ final class MacDesk: Desk {
         let chosen = try current()
         let target = try self.target(at: point, in: chosen)
         if chosen.window == nil { session.focus = target }
+        if let area = currentShare()?.area {
+            session.clicked(CGPoint(x: (point.x - area.minX) / area.width, y: (point.y - area.minY) / area.height))
+        }
         let note = try foreground.run(target, at: point, mayOpenMenu: true) { Input.click(at: point, right: right, twice: double) }
         return "Clicked, briefly in the foreground." + note
     }

@@ -1,4 +1,5 @@
-"""The GlimStone palette for the two themes, following the desktop's light or dark style."""
+"""The panel's palette for the two themes, warm blacks and whites around the accent, following
+the desktop's light or dark style."""
 
 from gi.repository import Gio, GLib, Gtk
 
@@ -8,7 +9,7 @@ ACCENT = (252, 196, 25)
 ACCENT_HOVER = (253, 214, 94)
 ACCENT_INK = (22, 22, 22)
 WARNING = (255, 131, 43)
-NEUTRAL = (141, 141, 141)
+NEUTRAL = (141, 136, 128)
 
 CONTROL_MS = 150
 CONTENT_MS = 220
@@ -18,15 +19,15 @@ PRESS_SCALE = 0.96
 class Palette:
     def __init__(self, dark):
         self.dark = dark
-        self.ground = (22, 22, 22) if dark else (244, 244, 244)
-        self.surface = (38, 38, 38) if dark else (255, 255, 255)
-        self.surface2 = (57, 57, 57) if dark else (232, 232, 232)
-        self.surface3 = (82, 82, 82) if dark else (209, 209, 209)
-        self.hover = (53, 53, 53) if dark else (224, 224, 224)
-        self.text = (244, 244, 244) if dark else (22, 22, 22)
-        self.secondary = (198, 198, 198) if dark else (82, 82, 82)
-        self.muted = (141, 141, 141) if dark else (111, 111, 111)
-        self.tip = self.surface2 if dark else (38, 38, 38)
+        self.ground = (15, 14, 12) if dark else (245, 243, 239)
+        self.surface = (28, 26, 23) if dark else (255, 255, 255)
+        self.surface2 = (52, 48, 43) if dark else (233, 230, 224)
+        self.surface3 = (78, 73, 66) if dark else (210, 205, 197)
+        self.hover = (46, 43, 38) if dark else (225, 221, 214)
+        self.text = (240, 236, 228) if dark else (24, 22, 19)
+        self.secondary = (190, 184, 173) if dark else (86, 81, 73)
+        self.muted = (140, 134, 124) if dark else (115, 109, 100)
+        self.tip = self.surface2 if dark else (28, 26, 23)
 
 
 def web(c):
@@ -77,6 +78,9 @@ window.knightsight {{ font-family: "Noto Sans", sans-serif; }}
 .soft.primary {{ background: {web(ACCENT)}; color: {web(ACCENT_INK)}; }}
 .soft.primary:hover {{ background: {web(ACCENT_HOVER)}; }}
 .soft.primary:disabled {{ background: {web(p.surface2)}; color: {web(p.muted)}; }}
+.soft.outline {{ background: {web(p.surface2)}; color: {web(p.text)}; box-shadow: inset 0 0 0 1.5px {web(ACCENT)}; }}
+.soft.outline:hover {{ background: {web(p.surface3)}; }}
+.soft.large {{ border-radius: 10px; font-size: 15px; }}
 .soft.round {{ border-radius: 14px; }}
 .soft.blank {{ background: none; color: {web(p.secondary)}; }}
 .soft.blank > .square {{ border-radius: 6px; transition: background {CONTROL_MS}ms ease-out; }}

@@ -334,16 +334,24 @@ class Desk:
         r = share.region or frame.area
         return picture.cut(frame.surface(), r.x, r.y, r.width, r.height)
 
+    def preview(self, share):
+        """The frames keep coming while a share is chosen, so the finder shows the newest one."""
+        return self.still(share)
+
     def look(self, share):
         reply = picture.encode(self.still(share))
         reply["title"] = share.title
         return reply
 
-    def _point(self, share, args):
+    def _point(self, share, args, clicked=None):
         """Maps a point in the picture to the stream, which counts in the desktop's own units
-        and may differ from the frame's pixels."""
+        and may differ from the frame's pixels. clicked gets the share's area and the point, both
+        in frame pixels."""
         frame = self._frame(share)
-        x, y = protocol.to_area(share.region or frame.area, args)
+        area = share.region or frame.area
+        x, y = protocol.to_area(area, args)
+        if clicked:
+            clicked(area, x, y)
         sw, sh = share.props.get("size") or (frame.width, frame.height)
         return x * sw / frame.width, y * sh / frame.height
 
@@ -357,7 +365,7 @@ class Desk:
         self._notify(share, "NotifyPointerMotionAbsolute", "(oa{sv}udd)", share.node, x, y)
 
     def click(self, share, args):
-        x, y = self._point(share, args)
+        x, y = self._point(share, args, self.panel.clicked)
         right, twice = protocol.flag(args, "right"), protocol.flag(args, "double")
         self._move(share, x, y)
         self.panel.busy()

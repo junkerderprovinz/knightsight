@@ -49,7 +49,7 @@ def window_share(frame, size=(1568, 882)):
 
 def desk():
     d = portal.Desk.__new__(portal.Desk)
-    d.panel = types.SimpleNamespace(busy=lambda: None, focused=False)
+    d.panel = types.SimpleNamespace(busy=lambda: None, clicked=lambda *_: None, focused=False)
     d.sent = []
     d._notify = lambda _share, method, _signature, *args: d.sent.append((method, args))
     return d

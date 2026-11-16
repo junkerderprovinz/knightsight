@@ -14,7 +14,7 @@ import unittest
 
 from harness import HERE, LINUX, Mcp, image_of, listening, pixel, run, spawn, stop_all, text_of, wait_for
 
-from knightsight import protocol, xlib
+from knightsight import protocol, theme, xlib
 
 NOTHING = protocol.NOTHING_SHARED
 
@@ -110,11 +110,10 @@ class SmokeX11(unittest.TestCase):
         tx, ty = origin(window(title))
 
         def framed():
-            r, g, b = screen_pixel(tx - 2, ty + 150)
-            return r == g == b and 120 < r < 160
+            return all(abs(c - n) <= 6 for c, n in zip(screen_pixel(tx - 2, ty + 150), theme.NEUTRAL))
 
         for _ in range(3):
-            press(*self.panel_point(110, 156))
+            press(*self.panel_point(280, 138))
             press(tx + 200, ty + 150)
             try:
                 return wait_for(framed, "the grey frame", 5)
@@ -124,7 +123,7 @@ class SmokeX11(unittest.TestCase):
 
     def start_sharing(self):
         for _ in range(3):
-            press(*self.panel_point(456, 156))
+            press(*self.panel_point(397, 188))
             try:
                 return wait_for(lambda: NOTHING not in text_of(self.mcp.tool("look")), "the share to start", 5)
             except AssertionError:
@@ -186,7 +185,7 @@ class SmokeX11(unittest.TestCase):
         run("xdotool", "key", "ctrl+alt+shift+x")
         wait_for(lambda: NOTHING in text_of(self.mcp.tool("look")), "the hotkey to end the share", 5)
 
-        press(*self.panel_point(266, 156))
+        press(*self.panel_point(397, 138))
         time.sleep(2)
         drag(100, 100, 300, 250)
         self.start_sharing()

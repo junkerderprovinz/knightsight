@@ -177,7 +177,7 @@ class SmokeWayland(unittest.TestCase):
         if cls.panel.poll() is not None:
             raise AssertionError(f"the panel exited with {cls.panel.returncode}")
         wait_for(lambda: window(KNIGHTSIGHT), "the KnightSight window", 30)
-        place(KNIGHTSIGHT, 690, 60)
+        place(KNIGHTSIGHT, 670, 60)
         time.sleep(1)
         cls.mcp = Mcp()
 
@@ -216,12 +216,13 @@ class SmokeWayland(unittest.TestCase):
     def test_window_share(self):
         self.assertIn(NOTHING, text_of(self.mcp.tool("look")))
 
-        self.panel_click(110, 156)
+        self.panel_click(280, 138)
         self.share_in_dialog()
-        time.sleep(1)
+        # The finder takes a new picture once a second, and the first frame may come late.
+        time.sleep(2.5)
         self.assertEqual(self.card_edge("panel-chosen.png"), theme.NEUTRAL)
 
-        self.panel_click(456, 156)
+        self.panel_click(397, 188)
         wait_for(lambda: NOTHING not in text_of(self.mcp.tool("look")), "the share to start", 10)
         time.sleep(1)
         # Lit in the accent colour, or on its way to the warning colour while requests come in.

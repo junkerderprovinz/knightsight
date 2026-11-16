@@ -33,6 +33,19 @@ def scaled(source, crop=None):
     return out
 
 
+def fitted(source, width, height):
+    """The picture shrunk or grown to fit inside width x height, keeping its shape."""
+    w, h = source.get_width(), source.get_height()
+    s = min(width / w, height / h)
+    out = cairo.ImageSurface(cairo.FORMAT_RGB24, max(1, round(w * s)), max(1, round(h * s)))
+    ctx = cairo.Context(out)
+    ctx.scale(s, s)
+    ctx.set_source_surface(source, 0, 0)
+    ctx.get_source().set_filter(cairo.FILTER_GOOD)
+    ctx.paint()
+    return out
+
+
 def png(surface):
     out = io.BytesIO()
     surface.write_to_png(out)

@@ -257,7 +257,7 @@ func run(_ mcp: Mcp) throws {
     let band = CGPoint(x: shared.bounds.minX + 200, y: shared.bounds.minY + titleBar + 50)
     var chosen = false
     for _ in 1...3 where !chosen {
-        press(onPanel(110, 156))
+        press(onPanel(280, 138))
         press(band)
         chosen = (try? wait("the frame", 5) { edges().count == 4 ? true : nil }) ?? false
     }
@@ -266,7 +266,7 @@ func run(_ mcp: Mcp) throws {
 
     var first: ToolReply?
     for _ in 1...3 where first == nil {
-        press(onPanel(456, 156))
+        press(onPanel(397, 188))
         first = try? wait("the share to start", 5) { () -> ToolReply? in
             let reply = try mcp.tool("look")
             return reply.text.contains(nothingShared) ? nil : reply
@@ -274,6 +274,7 @@ func run(_ mcp: Mcp) throws {
     }
     guard let look = first else { throw Failure("sharing did not start") }
     try save(look, "1-shared.png")
+    snap("1-panel.png")
     try expect(!look.isError, "look works once sharing is on", look.text)
     try expect(!look.text.contains("fully covered"), "a window in plain view is not called covered", look.text)
 

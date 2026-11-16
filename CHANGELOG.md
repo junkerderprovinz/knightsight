@@ -4,6 +4,12 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## Unreleased
+
+## 🎨 Design
+
+- **A new panel with a finder.** The left side of the panel shows the shared window as a small live picture. It turns from grey to colour when the share starts and its corners snap in yellow. While your assistant works, a line sweeps over it and a dot marks where it just clicked. The share button is bigger, the info button sits in the title bar, and the blacks and whites are a little warmer, in the dark and the light theme alike.
+
 ## v1.1.2 (2026-11-15)
 
 The pinboard has a button of its own.

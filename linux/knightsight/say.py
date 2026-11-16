@@ -22,8 +22,11 @@ def pick(english, deutsch):
 
 
 UNTITLED = pick("Untitled window", "Fenster ohne Titel")
-PICK_WINDOW = pick("Choose window", "Fenster wählen")
-PICK_REGION = pick("Choose region", "Bereich wählen")
+PICK_WINDOW = pick("Window", "Fenster")
+PICK_REGION = pick("Region", "Bereich")
+PICK_WINDOW_TIP = pick("Choose the window to share", "Fenster zum Freigeben wählen")
+PICK_REGION_TIP = pick("Choose a region of the screen", "Bereich des Bildschirms wählen")
+NO_TARGET = pick("No target", "Kein Ziel")
 START_SHARE = pick("Start sharing", "Freigabe starten")
 STOP_SHARE = pick("Stop sharing", "Freigabe beenden")
 CLOSE = pick("Close", "Schließen")

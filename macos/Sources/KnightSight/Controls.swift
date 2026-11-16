@@ -4,7 +4,8 @@ enum Glyph { case none, window, region, start, stop, info, pin, close }
 
 /// A rounded button: neutral on the card, or the one filled accent button of the view.
 /// Hover fades in and a press sinks it a little, both as transitions over Motion.control.
-/// A filled colour lights a neutral button, such as the chosen kind of a note.
+/// A filled colour lights a neutral button, such as the chosen kind of a note. An outline gives
+/// a quieter face with an accent edge, as Stop sharing wears it.
 final class SoftButton: NSButton {
     enum Kind { case neutral, primary }
 
@@ -12,8 +13,9 @@ final class SoftButton: NSButton {
     var glyph: Glyph { didSet { needsDisplay = true } }
     var radius: CGFloat = 6
     var filled: NSColor? { didSet { needsDisplay = true } }
+    var outline = false { didSet { needsDisplay = true } }
+    var label = Theme.semiBold(14) { didSet { needsDisplay = true } }
     var onPress: () -> Void = {}
-    private let label = Theme.semiBold(14)
     private var hovering = false, pressing = false
     private var lit = 0.0, sink = 0.0
     private var clock: Timer?
@@ -97,6 +99,9 @@ final class SoftButton: NSButton {
         } else if let filled {
             fill = Motion.mix(filled, Theme.rgb(255, 255, 255), 0.3 * t)
             ink = Theme.accentInk
+        } else if outline {
+            fill = Motion.mix(Theme.surface2, Theme.surface3, t)
+            ink = Theme.text
         } else if kind == .primary {
             fill = Motion.mix(Theme.accent, Theme.accentHover, t)
             ink = Theme.accentInk
@@ -109,6 +114,12 @@ final class SoftButton: NSButton {
         let r = CGRect(x: (bounds.width - w) / 2, y: (bounds.height - h) / 2, width: w, height: h)
         fill.setFill()
         NSBezierPath(roundedRect: r, xRadius: radius * scale, yRadius: radius * scale).fill()
+        if outline && isEnabled {
+            let edge = NSBezierPath(roundedRect: r.insetBy(dx: 0.75, dy: 0.75), xRadius: radius * scale - 0.75, yRadius: radius * scale - 0.75)
+            edge.lineWidth = 1.5
+            Theme.accent.setStroke()
+            edge.stroke()
+        }
 
         let attributes: [NSAttributedString.Key: Any] = [.font: label, .foregroundColor: ink]
         let text = title.isEmpty ? CGSize.zero : title.size(withAttributes: attributes)
