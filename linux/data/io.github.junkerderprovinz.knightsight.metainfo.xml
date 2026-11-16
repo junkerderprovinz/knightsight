@@ -70,6 +70,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="1.2.0" date="2026-11-16">
+      <description>
+        <p>A new panel with a finder: a small live picture of the shared window that turns from grey to colour when the share starts, with a sweeping line and a dot where your assistant clicks while it works.</p>
+      </description>
+      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.2.0</url>
+    </release>
     <release version="1.1.2" date="2026-11-15">
       <description>
         <p>The pinboard has a full button with its name on it, beside the info button.</p>

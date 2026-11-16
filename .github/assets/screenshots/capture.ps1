@@ -211,7 +211,7 @@ try {
     [Stage]::Launch((Resolve-Path $Exe).Path)
 
     [Stage]::Place($app, (Rect 36 96 620 560))
-    [Stage]::MovePanel($desk.X + 690, $desk.Y + 270)
+    [Stage]::MovePanel($desk.X + 680, $desk.Y + 260)
     [Stage]::ChooseWindow($app)
     Start-Sleep -Milliseconds 1200
     [Stage]::Shoot($desk, "$captures\pick.png")
@@ -226,8 +226,8 @@ try {
     Start-Sleep -Milliseconds 600
 
     # The region takes the input row and the first two columns, and the cut runs through the input.
-    [Stage]::Place($app, (Rect 30 40 900 620))
-    [Stage]::MovePanel($desk.X + 690, $desk.Y + 470)
+    [Stage]::Place($app, (Rect 30 40 650 620))
+    [Stage]::MovePanel($desk.X + 690, $desk.Y + 446)
     $region = Rect 40 82 585 364
     [Stage]::ChooseRegion($region)
     [Stage]::Start()
