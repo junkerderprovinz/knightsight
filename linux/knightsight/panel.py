@@ -12,12 +12,12 @@ from . import glyphs, logo, notes, picture, say, theme, widgets
 from .protocol import Refused
 from .widgets import bar_button, button
 
-WIDTH, HEIGHT, BAR, GUTTER = 600, 244, 40, 16
+WIDTH, HEIGHT, BAR, GUTTER = 720, 304, 44, 20
 CARD = (GUTTER, 0, WIDTH - 2 * GUTTER, HEIGHT - BAR - GUTTER)
-FINDER = (CARD[0] + 16, CARD[1] + 16, 176, CARD[3] - 32)
-VIEW = (FINDER[0] + 14, FINDER[1] + 14, FINDER[2] - 28, FINDER[3] - 28)
-SIDE = FINDER[0] + FINDER[2] + 18
-SIDE_WIDTH = CARD[0] + CARD[2] - 16 - SIDE
+FINDER = (CARD[0] + 24, CARD[1] + 24, 252, CARD[3] - 48)
+VIEW = (FINDER[0] + 18, FINDER[1] + 18, FINDER[2] - 36, FINDER[3] - 36)
+SIDE = FINDER[0] + FINDER[2] + 28
+SIDE_WIDTH = CARD[0] + CARD[2] - 24 - SIDE
 # A request less than this long ago counts as work in progress: frame and badge stay lit
 # through the pauses between the steps of one task.
 WORK_SPAN = 5.0
@@ -58,7 +58,7 @@ class Panel(Gtk.ApplicationWindow):
         self.preview_due = 0.0
         self.preview_busy = False
         self.lit = 0.0
-        self.corners = 14.0
+        self.corners = 18.0
         self.corner_speed = 0.0
         # Where the assistant clicked last, across and down the share from 0 to 1, and when.
         self.last_click = None
@@ -70,6 +70,11 @@ class Panel(Gtk.ApplicationWindow):
         self.toggle_gate = notes.Gate(TOGGLE_SPAN)
         self.board_notice = None
         self.awaiting_fetch = False
+        # The controls of the last look in this share, where click and scroll find a ref.
+        self.elements = None
+        # KnightSight's windows the pointer is over right now. Wayland tells a program where the
+        # pointer is only while it lies over one of its windows, and the assistant must not act on them.
+        self.under_pointer = set()
         self.palette = theme.Palette(False)
         self.css = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), self.css,
@@ -92,23 +97,27 @@ class Panel(Gtk.ApplicationWindow):
         theme.watch(self.restyle)
         fixed = Gtk.Fixed()
         fixed.put(self.canvas, 0, 0)
-        small = (SIDE_WIDTH - 16) / 3
+        small = (SIDE_WIDTH - 20) / 3
         row = []
         for i, (glyph, text, tip) in enumerate((("window", say.PICK_WINDOW, say.PICK_WINDOW_TIP),
                                                 ("region", say.PICK_REGION, say.PICK_REGION_TIP),
-                                                ("pin", say.PINBOARD, say.PINBOARD_TIP))):
-            left = round(SIDE + i * (small + 8))
-            b = button(glyph, text, round(SIDE + i * (small + 8) + small) - left, 36)
+                                                ("screen", say.PICK_SCREEN, say.PICK_SCREEN_TIP))):
+            left = round(SIDE + i * (small + 10))
+            b = button(glyph, text, round(SIDE + i * (small + 10) + small) - left, 40, "tall")
             b.set_tooltip_text(tip)
-            fixed.put(b, left, bottom - 16 - 48 - 8 - 36)
+            fixed.put(b, left, bottom - 24 - 52 - 12 - 40)
             row.append(b)
-        self.pick_window, self.pick_region, self.pin = row
-        self.toggle = button("start", say.START_SHARE, SIDE_WIDTH, 48, "primary", "large")
-        fixed.put(self.toggle, SIDE, bottom - 16 - 48)
+        self.pick_window, self.pick_region, self.pick_screen = row
+        self.pin = button("pin", say.PINBOARD, 132, 52, "tall")
+        self.pin.set_tooltip_text(say.PINBOARD_TIP)
+        fixed.put(self.pin, SIDE, bottom - 24 - 52)
+        self.toggle = button("start", say.START_SHARE, SIDE_WIDTH - 142, 52, "primary", "large")
+        fixed.put(self.toggle, SIDE + 142, bottom - 24 - 52)
         self.set_child(fixed)
 
         self.pick_window.connect("clicked", lambda _b: self.choose_window())
         self.pick_region.connect("clicked", lambda _b: self.choose_region())
+        self.pick_screen.connect("clicked", lambda _b: self.choose_screen())
         self.toggle.connect("clicked", lambda _b: self.stop() if self.active else self.start())
         self.pin.connect("clicked", lambda _b: self.toggle_pinboard())
 
@@ -120,13 +129,20 @@ class Panel(Gtk.ApplicationWindow):
         self.add_controller(keys)
         self.connect("notify::is-active", lambda *_: self.focus_moved())
         self.connect("close-request", self.on_close)
+        self.watch_pointer(self)
 
         self.desk = make_desk(self)
         self.info.set_tooltip_text(self.desk.help)
-        self.title_font = widgets.font(16, True)
-        self.body_font = widgets.font(13, False)
+        self.title_font = widgets.font(18, True)
+        self.body_font = widgets.font(14, False)
         GLib.timeout_add(16, self.tick)
         self.show_state()
+
+    def watch_pointer(self, window):
+        motion = Gtk.EventControllerMotion()
+        motion.connect("enter", lambda *_: self.under_pointer.add(window))
+        motion.connect("leave", lambda *_: self.under_pointer.discard(window))
+        window.add_controller(motion)
 
     def restyle(self, palette):
         self.palette = palette
@@ -157,13 +173,14 @@ class Panel(Gtk.ApplicationWindow):
         elif self.active:
             sub = say.SHARED
         else:
-            sub = say.REGION_CHOSEN if c.region is not None else say.WINDOW_CHOSEN
+            sub = say.WINDOW_CHOSEN if c.region is None else say.SCREEN_CHOSEN if c.screen else say.REGION_CHOSEN
         if (head, sub) != (self.headline, self.subline):
             self.old_headline, self.old_subline = self.headline, self.subline
             self.headline, self.subline = head, sub
             self.swap = 0.0
         self.pick_window.set_sensitive(not self.active)
         self.pick_region.set_sensitive(not self.active)
+        self.pick_screen.set_sensitive(not self.active)
         self.toggle.set_sensitive(c is not None)
         self.toggle.label.set_label(say.STOP_SHARE if self.active else say.START_SHARE)
         self.toggle.set_css_classes(["soft", "large", "outline" if self.active else "primary"])
@@ -183,22 +200,28 @@ class Panel(Gtk.ApplicationWindow):
         self.show_state()
 
     def choose_region(self):
+        monitor = self.get_display().get_monitor_at_surface(self.get_surface())
+        self.choose_on_screen(lambda: self.desk.pick_region(monitor, self.picked), say.PICK_SCREEN_IN_DIALOG)
+
+    def choose_screen(self):
+        self.choose_on_screen(lambda: self.desk.pick_screen(self.picked), say.PICK_WHOLE_SCREEN_IN_DIALOG)
+
+    def choose_on_screen(self, pick, hint):
         self.desk.stop_pick()
         self.picking = not self.desk.overlay
         self.notice = None
-        self.pick_hint = say.PICK_SCREEN_IN_DIALOG
-        monitor = self.get_display().get_monitor_at_surface(self.get_surface())
+        self.pick_hint = hint
         if self.desk.overlay:
             # Out of the picture before the screen is taken.
             self.set_visible(False)
 
             def later():
-                self.desk.pick_region(monitor, self.picked)
+                pick()
                 return False
 
             GLib.timeout_add(250, later)
         else:
-            self.desk.pick_region(monitor, self.picked)
+            pick()
         self.show_state()
 
     def picked(self, share, notice):
@@ -227,6 +250,7 @@ class Panel(Gtk.ApplicationWindow):
             return
         self.active = True
         self.board_notice = None
+        self.elements = None
         self.desk.bind_hotkey(self.hotkey)
         self.show_state()
 
@@ -258,6 +282,7 @@ class Panel(Gtk.ApplicationWindow):
             return
         self.board_notice = None
         self.pinboard = self.desk.pinboard(shot, self.pinboard_closed)
+        self.watch_pointer(self.pinboard)
         self.pinboard.present()
         self.show_state()
 
@@ -266,6 +291,7 @@ class Panel(Gtk.ApplicationWindow):
             self.pinboard.close()
 
     def pinboard_closed(self):
+        self.under_pointer.discard(self.pinboard)
         self.pinboard = None
         self.focus_moved()
         self.show_state()
@@ -320,7 +346,7 @@ class Panel(Gtk.ApplicationWindow):
 
         lit_to = 1 if self.active else 0
         breathe = 0.5 - 0.5 * math.cos(2 * math.pi * (now % BREATHE_SPAN) / BREATHE_SPAN) if moving else 0
-        corners_to = 6 if self.active else 14 + 6 * breathe
+        corners_to = 8 if self.active else 18 + 6 * breathe
         self.lit = theme.step(self.lit, lit_to, elapsed, theme.CONTENT_MS if moving else 0)
         if moving:
             # A spring, so the corners overshoot a little as they lock on.
@@ -408,21 +434,21 @@ class Panel(Gtk.ApplicationWindow):
     def paint(self, _area, ctx, _width, _height):
         p = self.palette
         cx, cy, cw, ch = CARD
-        glyphs.rounded(ctx, cx, cy, cw, ch, 10)
+        glyphs.rounded(ctx, cx, cy, cw, ch, 16)
         ctx.set_source_rgb(*theme.rgb(p.surface))
         ctx.fill()
         if not self.desk.overlay and self.chosen is not None:
             # Without a frame on the screen, the card wears it.
             w = self.frame_width
-            glyphs.rounded(ctx, cx + w / 2, cy + w / 2, cw - w, ch - w, 10 - w / 2)
+            glyphs.rounded(ctx, cx + w / 2, cy + w / 2, cw - w, ch - w, 16 - w / 2)
             ctx.set_source_rgb(*theme.rgb(self.frame_color))
             ctx.set_line_width(w)
             ctx.stroke()
 
         self.paint_finder(ctx)
-        logo.draw(ctx, SIDE, cy + 16, 28, self.get_scale_factor())
+        logo.draw(ctx, SIDE, cy + 24, 32, self.get_scale_factor())
         # The state dot: grey until shared, accent while shared, pulsing while work goes on.
-        d, mx, my = 8, SIDE, cy + 62
+        d, mx, my = 8, SIDE, cy + 76
         if self.working_now and theme.animations():
             ctx.set_source_rgba(*theme.rgb(theme.WARNING), 80 / 255 * self.pulse)
             ctx.arc(mx + d / 2, my, d, 0, 2 * math.pi)
@@ -441,7 +467,7 @@ class Panel(Gtk.ApplicationWindow):
     def paint_finder(self, ctx):
         p = self.palette
         fx, fy, fw, fh = FINDER
-        glyphs.rounded(ctx, fx, fy, fw, fh, 10)
+        glyphs.rounded(ctx, fx, fy, fw, fh, 12)
         ctx.set_source_rgb(*theme.rgb((18, 17, 16) if p.dark else p.surface2))
         ctx.fill()
         t = theme.ease(self.lit)
@@ -480,7 +506,7 @@ class Panel(Gtk.ApplicationWindow):
                 self.paint_work(ctx, x, y, w, h)
             ctx.restore()
 
-        c, arm = self.corners, 16
+        c, arm = self.corners, 20
         left, top, right, bottom = fx + c, fy + c, fx + fw - c, fy + fh - c
         ctx.set_source_rgb(*theme.rgb(theme.mix(p.muted, theme.ACCENT, t)))
         ctx.set_line_width(2)
@@ -521,8 +547,8 @@ class Panel(Gtk.ApplicationWindow):
     def texts(self, ctx, head, sub, alpha, dy):
         p = self.palette
         cy = CARD[1]
-        for text, font, color, x, top, w in ((head, self.title_font, p.text, SIDE + 38, cy + 19, SIDE_WIDTH - 38),
-                                             (sub, self.body_font, p.secondary, SIDE + 16, cy + 52, SIDE_WIDTH - 16)):
+        for text, font, color, x, top, w in ((head, self.title_font, p.text, SIDE + 44, cy + 28, SIDE_WIDTH - 44),
+                                             (sub, self.body_font, p.secondary, SIDE + 18, cy + 66, SIDE_WIDTH - 18)):
             layout = PangoCairo.create_layout(ctx)
             layout.set_font_description(font)
             layout.set_text(text, -1)

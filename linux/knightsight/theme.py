@@ -1,6 +1,8 @@
 """The panel's palette for the two themes, warm blacks and whites around the accent, following
 the desktop's light or dark style."""
 
+import math
+
 from gi.repository import Gio, GLib, Gtk
 
 from . import notes
@@ -39,7 +41,13 @@ def rgb(c):
 
 
 def mix(a, b, t):
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+    """The colour t of the way from a to b, each channel rounded towards b, so a colour moved a
+    little towards b in every frame gets there and does not stop a few steps short."""
+    out = []
+    for x, y in zip(a, b):
+        step = (y - x) * t
+        out.append(x + (math.ceil(step) if step > 0 else math.floor(step)))
+    return tuple(out)
 
 
 def ease(t):
@@ -80,7 +88,8 @@ window.knightsight {{ font-family: "Noto Sans", sans-serif; }}
 .soft.primary:disabled {{ background: {web(p.surface2)}; color: {web(p.muted)}; }}
 .soft.outline {{ background: {web(p.surface2)}; color: {web(p.text)}; box-shadow: inset 0 0 0 1.5px {web(ACCENT)}; }}
 .soft.outline:hover {{ background: {web(p.surface3)}; }}
-.soft.large {{ border-radius: 10px; font-size: 15px; }}
+.soft.large {{ border-radius: 12px; font-size: 15px; }}
+.soft.tall {{ border-radius: 10px; }}
 .soft.round {{ border-radius: 14px; }}
 .soft.blank {{ background: none; color: {web(p.secondary)}; }}
 .soft.blank > .square {{ border-radius: 6px; transition: background {CONTROL_MS}ms ease-out; }}

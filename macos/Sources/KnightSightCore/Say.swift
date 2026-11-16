@@ -15,19 +15,23 @@ public struct Say {
     public var untitled: String { pick("Untitled window", "Fenster ohne Titel") }
     public var pickWindow: String { pick("Window", "Fenster") }
     public var pickRegion: String { pick("Region", "Bereich") }
+    public var pickScreen: String { pick("Screen", "Bildschirm") }
     public var pickWindowTip: String { pick("Choose the window to share", "Fenster zum Freigeben wählen") }
     public var pickRegionTip: String { pick("Choose a region of the screen", "Bereich des Bildschirms wählen") }
+    public var pickScreenTip: String { pick("Share a whole screen", "Einen ganzen Bildschirm freigeben") }
+    public var clickScreen: String { pick("Click to share this screen", "Klick, um diesen Bildschirm freizugeben") }
     public var noTarget: String { pick("No target", "Kein Ziel") }
     public var startShare: String { pick("Start sharing", "Freigabe starten") }
     public var stopShare: String { pick("Stop sharing", "Freigabe beenden") }
     public var quit: String { pick("Quit KnightSight", "KnightSight beenden") }
     public var nothingChosen: String { pick("Nothing chosen yet", "Noch nichts gewählt") }
     public var clickTarget: String { pick("Now click the window you want to share.", "Klick jetzt das Fenster an, das du freigeben willst.") }
-    public var chooseTarget: String { pick("Choose a window or a region.", "Wähl ein Fenster oder einen Bereich.") }
+    public var chooseTarget: String { pick("Choose what to share.", "Wähl, was du freigeben willst.") }
     public var doing: String { pick("Now: ", "Gerade: ") }
     public var shared: String { pick("Shared. Carry on as usual.", "Freigegeben. Du kannst normal weiterarbeiten.") }
     public var windowChosen: String { pick("Window chosen, not shared yet.", "Fenster gewählt, noch nicht freigegeben.") }
     public var regionChosen: String { pick("Region chosen, not shared yet.", "Bereich gewählt, noch nicht freigegeben.") }
+    public var screenChosen: String { pick("Screen chosen, not shared yet.", "Bildschirm gewählt, noch nicht freigegeben.") }
     public var region: String { pick("Region", "Bereich") }
     public var looking: String { pick("Taking a screenshot", "Mache Screenshot") }
     public var rightClicking: String { pick("Right-clicking", "Rechtsklick") }
@@ -84,6 +88,11 @@ public struct Say {
     public func fileHeading(_ title: String) -> String { pick("Pinboard notes on \(title)", "Pinnwand-Notizen zu \(title)") }
     public func roundLabel(_ number: Int) -> String { pick("Round \(number)", "Runde \(number)") }
     public func from(_ author: String) -> String { pick("from \(author)", "von \(author)") }
+
+    /// A whole screen as the title of its share, numbered from 1 in the system's order.
+    public func screen(_ number: Int, width: Int, height: Int) -> String {
+        pick("Screen \(number) (\(width) x \(height))", "Bildschirm \(number) (\(width) x \(height))")
+    }
 
     /// The line the panel shows while macOS still holds back a permission.
     public func allow(screen: Bool, input: Bool) -> String {

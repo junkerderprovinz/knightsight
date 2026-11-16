@@ -24,8 +24,11 @@ def pick(english, deutsch):
 UNTITLED = pick("Untitled window", "Fenster ohne Titel")
 PICK_WINDOW = pick("Window", "Fenster")
 PICK_REGION = pick("Region", "Bereich")
+PICK_SCREEN = pick("Screen", "Bildschirm")
 PICK_WINDOW_TIP = pick("Choose the window to share", "Fenster zum Freigeben wählen")
 PICK_REGION_TIP = pick("Choose a region of the screen", "Bereich des Bildschirms wählen")
+PICK_SCREEN_TIP = pick("Share a whole screen", "Einen ganzen Bildschirm freigeben")
+SCREEN_HINT = pick("Click to share this screen", "Klick, um diesen Bildschirm freizugeben")
 NO_TARGET = pick("No target", "Kein Ziel")
 START_SHARE = pick("Start sharing", "Freigabe starten")
 STOP_SHARE = pick("Stop sharing", "Freigabe beenden")
@@ -33,11 +36,12 @@ CLOSE = pick("Close", "Schließen")
 MINIMISE = pick("Minimize", "Minimieren")
 NOTHING_CHOSEN = pick("Nothing chosen yet", "Noch nichts gewählt")
 CLICK_TARGET = pick("Now click the window you want to share.", "Klick jetzt das Fenster an, das du freigeben willst.")
-CHOOSE_TARGET = pick("Choose a window or a region.", "Wähl ein Fenster oder einen Bereich.")
+CHOOSE_TARGET = pick("Choose what to share.", "Wähl, was du freigeben willst.")
 DOING = pick("Now: ", "Gerade: ")
 SHARED = pick("Shared. Carry on as usual.", "Freigegeben. Du kannst normal weiterarbeiten.")
 WINDOW_CHOSEN = pick("Window chosen, not shared yet.", "Fenster gewählt, noch nicht freigegeben.")
 REGION_CHOSEN = pick("Region chosen, not shared yet.", "Bereich gewählt, noch nicht freigegeben.")
+SCREEN_CHOSEN = pick("Screen chosen, not shared yet.", "Bildschirm gewählt, noch nicht freigegeben.")
 REGION = pick("Region", "Bereich")
 CHOSEN_WINDOW = pick("Chosen window", "Gewähltes Fenster")
 LOOKING = pick("Taking a screenshot", "Mache Screenshot")
@@ -53,6 +57,8 @@ PICK_IN_DIALOG = pick("Choose the window in the dialog that opens.", "Wähl das 
 PICK_SCREEN_IN_DIALOG = pick(
     "Choose the screen in the dialog, then drag a rectangle.",
     "Wähl im Dialog den Bildschirm und zieh dann ein Rechteck auf.")
+PICK_WHOLE_SCREEN_IN_DIALOG = pick("Choose the screen in the dialog that opens.",
+                                   "Wähl den Bildschirm im Dialog, der gleich aufgeht.")
 NO_PORTAL = pick(
     "This desktop doesn't let programs share the screen.",
     "Dieser Desktop erlaubt Programmen keine Bildschirmfreigabe.")
@@ -91,6 +97,13 @@ def sent(count):
                     "1 Notiz gesendet. Dein Assistent kann sie abholen.")
     return pick(f"Sent {count} notes. Your assistant can fetch them now.",
                 f"{count} Notizen gesendet. Dein Assistent kann sie abholen.")
+
+
+def screen(number, width, height):
+    """The title of a whole screen, numbered in the system's order of the monitors when known."""
+    if number is None:
+        return pick(f"Screen ({width} x {height})", f"Bildschirm ({width} x {height})")
+    return pick(f"Screen {number} ({width} x {height})", f"Bildschirm {number} ({width} x {height})")
 
 
 def spots(count):

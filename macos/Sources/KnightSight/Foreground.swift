@@ -143,7 +143,7 @@ final class Foreground {
     }
 
     // Accessibility does not name window numbers, so the window is found by its frame.
-    private static func axWindow(of target: WindowInfo) -> AXUIElement? {
+    static func axWindow(of target: WindowInfo) -> AXUIElement? {
         var list: CFTypeRef?
         guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(target.pid), kAXWindowsAttribute as CFString, &list) == .success,
               let windows = list as? [AXUIElement]

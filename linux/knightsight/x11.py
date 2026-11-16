@@ -1,5 +1,6 @@
 """The desk on an X11 session: Composite for pictures of covered windows, XTEST for input,
-frame and badge as click-through windows of our own around the share, and the pinboard on it."""
+frame, badge and the assistant's arrow as click-through windows of our own around the share,
+and the pinboard on it."""
 
 import ctypes
 import math
@@ -12,10 +13,10 @@ from ctypes import byref
 import cairo
 from gi.repository import Gdk, GLib, Pango, PangoCairo
 
-from . import picture, protocol, say, theme, xlib
+from . import elements, picture, protocol, say, theme, xlib
 from .glyphs import rounded
 from .overlay import Overlay
-from .picker import RegionPicker
+from .picker import RegionPicker, ScreenPicker
 from .pinboard import Pinboard
 from .protocol import Rect, Refused
 
@@ -25,15 +26,49 @@ STOP_KEY = (b"x", xlib.ControlMask | xlib.Mod1Mask | xlib.ShiftMask)
 PINBOARD_KEY = (b"a", xlib.ControlMask | xlib.ShiftMask)
 # Caps Lock and Num Lock count as modifiers too, so each of their states needs its own grab.
 LOCKS = (0, xlib.LockMask, xlib.Mod2Mask, xlib.LockMask | xlib.Mod2Mask)
+PROC = "/proc"
+GONE = "The shared window has closed."
+BADGE_SHADOW = 8
+# The arrow's window leaves room around the tip for the ripple's widest ring.
+CURSOR_SIZE, CURSOR_TIP = 52, 26
+ARROW = ((0, 0), (0, 16.5), (4, 12.7), (6.8, 19.2), (9.6, 18), (6.9, 11.6), (12.2, 11.6))
+CURSOR_INK = (22, 22, 22)
+GLIDE_S = 0.22
+RING_S = 0.4
+RING_FROM, RING_TO = 6, 22
+SECOND_RING_S = 0.15
+IDLE_S = 4.0
+RESTACK_S = 0.25
 
 
 class Share:
-    def __init__(self, title, window=0, region=None):
+    def __init__(self, title, window=0, region=None, owner=None, screen=False):
         self.title = title
         self.window = window
         self.region = region
+        self.screen = screen
+        # The process behind the window and when it started. The X server hands the id of a
+        # closed window out again, so the id alone could later name a window of another program.
+        self.owner = owner
         # The window that took the last click inside a region. Keys only go there.
         self.focus = 0
+        # Where the last click went, from the share's top left corner, so the arrow knows
+        # where typing lands.
+        self.pointed = None
+
+
+def stat_start(stat):
+    """When a process started, from its line in /proc/<pid>/stat. The command name in
+    brackets may itself hold spaces and brackets, so the fields count from the last one."""
+    return int(stat[stat.rindex(")") + 2:].split()[19])
+
+
+def started(pid):
+    try:
+        with open(f"{PROC}/{pid}/stat") as f:
+            return stat_start(f.read())
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def _keysym(key, is_char):
@@ -73,6 +108,18 @@ class Windows:
 
     def is_own(self, w):
         return self.x.prop(w, "_NET_WM_PID") == [os.getpid()]
+
+    def pid(self, w):
+        value = self.x.prop(w, "_NET_WM_PID")
+        return value[0] if value else None
+
+    def owner(self, w):
+        pid = self.pid(w)
+        return None if pid is None else (pid, started(pid))
+
+    def belongs(self, share):
+        """Whether the shared window is still there and still the one that was chosen."""
+        return self.x.attributes(share.window) is not None and self.owner(share.window) == share.owner
 
     def is_desktop(self, w):
         kinds = self.x.prop(w, "_NET_WM_WINDOW_TYPE") or []
@@ -133,6 +180,7 @@ class Desk:
         self.lent = 0
         self.scratch = None
         self.frame = Frame(self.ui)
+        self.cursor = Cursor(self.frame)
         # The open pinboard while it lies on the share.
         self.board = None
         self.hotkeys = {}
@@ -142,6 +190,7 @@ class Desk:
 
     def close(self):
         self.frame.hide()
+        self.cursor.vanish()
 
     def _grab(self, key, name):
         """Takes a hotkey for the whole screen and gives back its keycode."""
@@ -227,7 +276,7 @@ class Desk:
         if self.was_down and not down and child:
             w = self.uiw.client(child)
             if not self.uiw.is_own(w) and not self.uiw.is_desktop(w):
-                chosen = Share(self.uiw.title(w), window=w)
+                chosen = Share(self.uiw.title(w), window=w, owner=self.uiw.owner(w))
                 self._redirect(w)
         self.was_down = down
         return chosen
@@ -245,27 +294,53 @@ class Desk:
             self.ui.failed()
             self.redirected = 0
 
-    def pick_region(self, monitor, done):
-        """Takes a still picture of the monitor the panel was on and lets the person drag over it."""
+    def _monitor_shot(self, monitor):
+        """A monitor's bounds in the screen's pixels and a still picture of it, or None."""
         scale = monitor.get_scale_factor()
         g = monitor.get_geometry()
-        origin = (g.x * scale, g.y * scale)
-        pixels = self.ui.image(self.ui.root, origin[0], origin[1], g.width * scale, g.height * scale)
+        r = Rect(g.x * scale, g.y * scale, g.width * scale, g.height * scale)
+        pixels = self.ui.image(self.ui.root, r.x, r.y, r.width, r.height)
         if pixels is None:
+            return None
+        data, stride, _ = pixels
+        return r, picture.surface(data, stride, r.width, r.height, False)
+
+    def pick_region(self, monitor, done):
+        """Takes a still picture of the monitor the panel was on and lets the person drag over it."""
+        taken = self._monitor_shot(monitor)
+        if taken is None:
             done(None, None)
             return
-        data, stride, _ = pixels
-        shot = picture.surface(data, stride, g.width * scale, g.height * scale, False)
+        bounds, shot = taken
 
         def picked(r):
             if r is None:
                 done(None, None)
                 return
             self.release()
-            region = Rect(origin[0] + r[0], origin[1] + r[1], r[2], r[3])
+            region = Rect(bounds.x + r[0], bounds.y + r[1], r[2], r[3])
             done(Share(f"{say.REGION} {region.width} x {region.height}", region=region), None)
 
         RegionPicker(shot, monitor, picked).present()
+
+    def pick_screen(self, done):
+        """Takes a still picture of every monitor and lets the person click the one to share."""
+        monitors = self.panel.get_display().get_monitors()
+        screens = [monitors.get_item(i) for i in range(monitors.get_n_items())]
+        taken = [self._monitor_shot(m) for m in screens]
+        if not taken or None in taken:
+            done(None, None)
+            return
+
+        def picked(i):
+            if i is None:
+                done(None, None)
+                return
+            self.release()
+            r = taken[i][0]
+            done(Share(say.screen(i + 1, r.width, r.height), region=r, screen=True), None)
+
+        ScreenPicker([(m, shot) for m, (_, shot) in zip(screens, taken)], picked).present()
 
     def title(self, share):
         return self.uiw.title(share.window) if share.window else share.title
@@ -274,7 +349,11 @@ class Desk:
         return self.uiw.bounds(share.window) if share.window else share.region
 
     def gone(self, share):
-        return bool(share.window) and self.ui.attributes(share.window) is None
+        return bool(share.window) and not self.uiw.belongs(share)
+
+    def _there(self, share):
+        if share.window and not self.workw.belongs(share):
+            raise Refused(GONE)
 
     def hidden(self, share):
         return bool(share.window) and self.uiw.minimized(share.window)
@@ -303,24 +382,45 @@ class Desk:
         return True
 
     def look(self, share):
+        self._there(share)
         if share.window:
             reply = picture.encode(self._window_shot(share.window, self.workw))
             reply["title"] = self.workw.title(share.window)
-            return reply
-        with self._out_of_shot(share.region):
-            shot = self._region_shot(share.region, self.work)
-        reply = picture.encode(shot)
-        reply["title"] = share.title
+            found = self._controls(share.window, self.workw.bounds(share.window))
+        else:
+            r = share.region
+            with self._out_of_shot(r):
+                shot = self._region_shot(r, self.work)
+            reply = picture.encode(shot)
+            reply["title"] = share.title
+            w = self.workw.at(r.x + r.width // 2, r.y + r.height // 2)
+            found = self._controls(w, r) if w and not self.workw.is_own(w) else None
+        if found is not None:
+            reply["elements"] = found
         return reply
+
+    def _controls(self, w, area):
+        """The controls of window w, placed into the share's area."""
+        b = self.workw.bounds(w)
+        if b is None or area is None:
+            return None
+        return elements.controls((b.width, b.height), (area.width, area.height), self.workw.pid(w),
+                                 self.workw.title(w), (b.x - area.x, b.y - area.y))
 
     def still(self, share):
         """The share in full resolution for the pinboard, taken on the panel's own connection."""
         if share.window:
             return self._window_shot(share.window, self.uiw)
-        if self.frame.inside(share.region):
-            self.frame.hide_badge()
-            time.sleep(0.04)
-        return self._region_shot(share.region, self.ui)
+        r = share.region
+        if not self.frame.inside(r) and not self.cursor.inside(r):
+            return self._region_shot(r, self.ui)
+        self.frame.hide_badge()
+        self.cursor.hold()
+        time.sleep(0.04)
+        try:
+            return self._region_shot(r, self.ui)
+        finally:
+            self.cursor.let_go()
 
     def preview(self, share):
         """The share for the panel's finder, with whatever lies over a region left in."""
@@ -338,10 +438,10 @@ class Desk:
 
     @contextmanager
     def _out_of_shot(self, r):
-        """A region is copied off the screen, so a badge sitting inside it and the pinboard over
-        it step away for the shot."""
+        """A region is copied off the screen, so a badge or the arrow sitting inside it and the
+        pinboard over it step away for the shot."""
         board = self.board
-        if board is None and not self.frame.inside(r):
+        if board is None and not self.frame.inside(r) and not self.cursor.inside(r):
             yield
             return
         self.panel.badge_held = True
@@ -350,6 +450,7 @@ class Desk:
 
         def away():
             self.frame.hide_badge()
+            self.cursor.hold()
             if board is not None:
                 went.append(board.keep_out(r))
             hidden.set()
@@ -361,6 +462,7 @@ class Desk:
             yield
         finally:
             self.panel.badge_held = False
+            GLib.idle_add(self.cursor.let_go)
             if went:
                 GLib.idle_add(board.bring_back, went[0])
 
@@ -397,6 +499,7 @@ class Desk:
         return shot
 
     def _area(self, share):
+        self._there(share)
         area = self.workw.bounds(share.window) if share.window else share.region
         if area is None:
             raise Refused("The shared window has no size right now.")
@@ -406,15 +509,35 @@ class Desk:
         return protocol.to_area(self._area(share), args)
 
     def _root_for(self, share, x, y):
+        """The window a click or scroll at x, y goes to. Clicks pass through the badge, but
+        one under it would seem to land on it, so it counts as KnightSight's like the pinboard."""
+        board = self.board
+        ours = [self.frame.badge_box()]
+        if board is not None:
+            ours += [board.veil.box(), board.box]
+        protocol.clear_of(x, y, ours)
         if share.window:
             return share.window
         w = self.workw.at(x, y)
-        if not w or self.workw.is_own(w):
+        if w and self.workw.is_own(w):
+            raise Refused(protocol.ON_US)
+        if not w:
             raise Refused("No window that takes input lies at this point.")
         share.focus = w
         return w
 
+    def _point_at(self, x, y, w):
+        """Lets the assistant's arrow glide to x, y over window w before the input goes out."""
+        time.sleep(self.cursor.aim(x, y, self.workw.top(w)))
+
+    def _point_at_keys(self, share, w):
+        """Typing points where the last click went, or at the middle of the share."""
+        area = self._area(share)
+        dx, dy = share.pointed or (area.width // 2, area.height // 2)
+        self._point_at(area.x + dx, area.y + dy, w)
+
     def _key_root(self, share):
+        self._there(share)
         if share.window:
             return share.window
         if not share.focus or self.work.attributes(share.focus) is None:
@@ -446,9 +569,12 @@ class Desk:
         if not self._activate(w):
             raise Refused("The shared window cannot be brought to the front.")
         try:
-            act()
-            xlib.XSync(self.work.d, False)
-            time.sleep(0.15)
+            with protocol.delivering():
+                act()
+                xlib.XSync(self.work.d, False)
+                time.sleep(0.15)
+                if self.work.attributes(w) is None:
+                    raise Refused("The window closed while the input went to it.")
         finally:
             xlib.XTestFakeMotionEvent(self.work.d, -1, px, py, 0)
             xlib.XFlush(self.work.d)
@@ -478,9 +604,12 @@ class Desk:
         right, twice = protocol.flag(args, "right"), protocol.flag(args, "double")
         self.panel.clicked(area, x, y)
         self.panel.busy()
+        share.pointed = (x - area.x, y - area.y)
+        self._point_at(x, y, w)
 
         def act():
             xlib.XTestFakeMotionEvent(self.work.d, -1, x, y, 0)
+            self.cursor.ripple(2 if twice else 1)
             self._button(3 if right else 1, 2 if twice else 1)
 
         return "Clicked, briefly in the foreground." + self._foreground(w, act)
@@ -490,6 +619,7 @@ class Desk:
         notches = round(protocol.number(args, "amount"))
         w = self._root_for(share, x, y)
         self.panel.busy()
+        self._point_at(x, y, w)
 
         def act():
             xlib.XTestFakeMotionEvent(self.work.d, -1, x, y, 0)
@@ -500,6 +630,7 @@ class Desk:
     def type(self, share, text):
         w = self._key_root(share)
         self.panel.busy()
+        self._point_at_keys(share, w)
 
         def act():
             for key, is_char in protocol.text_keys(text):
@@ -514,6 +645,7 @@ class Desk:
         combo = protocol.parse_combo(keys)
         w = self._key_root(share)
         self.panel.busy()
+        self._point_at_keys(share, w)
         held = [MODIFIER_KEYS[m] for m in combo.held]
 
         def act():
@@ -583,11 +715,13 @@ class Desk:
     def show(self, share, area, color, width, badge):
         above = 0 if share.region else self.uiw.top(share.window)
         self.frame.show(area, color, width, above, badge)
+        self.cursor.step(self.panel.active)
         if self.board is not None:
             self.board.follow(area, above)
 
     def hide(self):
         self.frame.hide()
+        self.cursor.vanish()
         if self.board is not None:
             self.board.veil.hide()
 
@@ -605,6 +739,7 @@ class Frame:
         self.edges = []
         self.badge = None
         self.badge_size = (0, 0)
+        self.badge_at = None
         self.mapped = False
         self.last = None
         self.restacked = 0
@@ -617,7 +752,8 @@ class Frame:
             xlib.XMatchVisualInfo(x.d, x.screen, 32, xlib.TrueColor, byref(visual)))
         self.visual = visual
 
-    def _window(self, argb=False):
+    def window(self, argb=False):
+        """A click-through window of our own on the root, see-through where argb is set."""
         a = xlib.XSetWindowAttributes()
         a.override_redirect = True
         mask = xlib.CWOverrideRedirect | xlib.CWBackPixel | xlib.CWBorderPixel
@@ -633,10 +769,10 @@ class Frame:
 
     def show(self, r, color, width, above, badge):
         if not self.edges:
-            self.edges = [self._window() for _ in range(4)]
+            self.edges = [self.window() for _ in range(4)]
             for e in self.edges:
                 self.x.set_prop(e, "_NET_WM_WINDOW_OPACITY", "CARDINAL", [int(0.9 * 0xFFFFFFFF)])
-            self.badge = self._window(self.argb)
+            self.badge = self.window(self.argb)
         sides = [
             (r.x - width, r.y - width, r.width + 2 * width, width),
             (r.x - width, r.bottom, r.width + 2 * width, width),
@@ -687,25 +823,33 @@ class Frame:
             self._badge(r, None)
             return
         img, size = self._render(text, alpha, pulse, palette)
-        xlib.XMoveResizeWindow(d, self.badge, *self.spot(r, size), *size)
+        self.badge_at = self.spot(r, size)
+        xlib.XMoveResizeWindow(d, self.badge, *self.badge_at, *size)
         if size != self.badge_size:
             if not self.argb:
-                self._shape(img)
+                self.cut(self.badge, img)
             if not self.badge_size[0]:
                 xlib.XMapRaised(d, self.badge)
             self.badge_size = size
-        self._put(img)
+        self.put(self.badge, img, self.argb)
 
     @staticmethod
     def spot(r, size):
         """Above the top right corner of the frame, or inside it when the share reaches the top of the screen."""
-        shadow, gap, outer = 8, 6, 5
+        shadow, gap, outer = BADGE_SHADOW, 6, 5
         x = r.right + outer - size[0] + shadow
         y = r.y - outer - gap - size[1] + shadow
         if y < 0:
             x = r.right - 10 - size[0] + shadow
             y = r.y + 10 - shadow
         return x, y
+
+    def badge_box(self):
+        """Where the badge's pill lies on the screen while it shows, else None."""
+        if not self.badge_size[0]:
+            return None
+        (x, y), (w, h) = self.badge_at, self.badge_size
+        return Rect(x + BADGE_SHADOW, y + BADGE_SHADOW, w - 2 * BADGE_SHADOW, h - 2 * BADGE_SHADOW)
 
     def inside(self, r):
         if not self.badge_size[0]:
@@ -719,7 +863,7 @@ class Frame:
         layout.set_font_description(self.font)
         layout.set_text(text, -1)
         tw = layout.get_pixel_size()[0]
-        shadow = 8
+        shadow = BADGE_SHADOW
         w, h = math.ceil(tw + 40 + 2 * shadow), 30 + 2 * shadow
         img = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
         ctx = cairo.Context(img)
@@ -751,8 +895,8 @@ class Frame:
         img.flush()
         return img, (w, h)
 
-    def _shape(self, img):
-        """Without a compositor the badge window is cut to the pill instead of being see-through."""
+    def cut(self, window, img):
+        """Without a compositor a mark is cut to the shape of its picture instead of being see-through."""
         w, h = img.get_width(), img.get_height()
         data, stride = img.get_data(), img.get_stride()
         row = (w + 7) // 8
@@ -761,19 +905,19 @@ class Frame:
             for x in range(w):
                 if data[y * stride + x * 4 + 3] >= 128:
                     bits[y * row + x // 8] |= 1 << (x % 8)
-        mask = xlib.XCreateBitmapFromData(self.x.d, self.badge, bytes(bits), w, h)
-        xlib.XShapeCombineMask(self.x.d, self.badge, xlib.ShapeBounding, 0, 0, mask, xlib.ShapeSet)
+        mask = xlib.XCreateBitmapFromData(self.x.d, window, bytes(bits), w, h)
+        xlib.XShapeCombineMask(self.x.d, window, xlib.ShapeBounding, 0, 0, mask, xlib.ShapeSet)
         xlib.XFreePixmap(self.x.d, mask)
 
-    def _put(self, img):
+    def put(self, window, img, argb):
         d = self.x.d
         w, h, stride = img.get_width(), img.get_height(), img.get_stride()
         buf = (ctypes.c_char * (stride * h)).from_buffer_copy(bytes(img.get_data()))
-        depth = 32 if self.argb else xlib.XDefaultDepth(d, self.x.screen)
-        visual = self.visual.visual if self.argb else xlib.XDefaultVisual(d, self.x.screen)
+        depth = 32 if argb else xlib.XDefaultDepth(d, self.x.screen)
+        visual = self.visual.visual if argb else xlib.XDefaultVisual(d, self.x.screen)
         ximage = xlib.XCreateImage(d, visual, depth, xlib.ZPixmap, 0, ctypes.addressof(buf), w, h, 32, stride)
-        gc = xlib.XCreateGC(d, self.badge, 0, None)
-        xlib.XPutImage(d, self.badge, gc, ximage, 0, 0, 0, 0, w, h)
+        gc = xlib.XCreateGC(d, window, 0, None)
+        xlib.XPutImage(d, window, gc, ximage, 0, 0, 0, 0, w, h)
         xlib.XFreeGC(d, gc)
         xlib.XSync(d, False)
         # The pixels belong to buf, so only the structure is freed.
@@ -791,3 +935,182 @@ class Frame:
             self.mapped = False
             xlib.XFlush(self.x.d)
 
+
+def glided(start, goal, t):
+    """Where the arrow stands after the part t of its glide, slowing towards the goal."""
+    k = theme.ease(min(1.0, max(0.0, t)))
+    return start[0] + (goal[0] - start[0]) * k, start[1] + (goal[1] - start[1]) * k
+
+
+def rings(starts, now):
+    """Radius and opacity of each ripple ring at now, from the moments the rings began."""
+    out = []
+    for began in starts:
+        t = (now - began) / RING_S
+        if 0 <= t < 1:
+            out.append((RING_FROM + (RING_TO - RING_FROM) * theme.ease(t), 1 - t))
+    return out
+
+
+class Cursor:
+    """The assistant's arrow at the spot of its next action, in a click-through window right
+    above the window it points into, so it hides behind whatever covers that window. The
+    request thread aims it, the panel's tick moves and draws it."""
+
+    def __init__(self, frame):
+        self.frame = frame
+        self.x = frame.x
+        self.w = 0
+        self.lock = threading.Lock()
+        self.tip = None
+        self.glide = None
+        self.above = 0
+        self.starts = []
+        self.last = 0.0
+        self.alpha = 0.0
+        self.moving = True
+        self.stepped = time.monotonic()
+        self.held = 0
+        self.mapped = False
+        self.spot = None
+        self.drawn = None
+        self.img = None
+        self.restacked = 0.0
+
+    def aim(self, x, y, above):
+        """Sends the arrow to x, y over the top level window above and tells how long it takes
+        to get there. Where it does not show yet it fades in at the spot."""
+        with self.lock:
+            self.last = now = time.monotonic()
+            if above != self.above:
+                self.above, self.restacked = above, 0.0
+            if self.tip is None or self.alpha == 0 or not self.moving:
+                self.tip, self.glide = (x, y), None
+                return 0
+            self.glide = (self.tip, (x, y), now)
+            return GLIDE_S
+
+    def ripple(self, times):
+        with self.lock:
+            if self.moving:
+                now = time.monotonic()
+                self.starts += [now + i * SECOND_RING_S for i in range(times)]
+
+    def step(self, active):
+        now = time.monotonic()
+        elapsed, self.stepped = (now - self.stepped) * 1000, now
+        self.moving = theme.animations()
+        if not active:
+            self.vanish()
+            return
+        with self.lock:
+            if self.tip is None:
+                return
+            if self.glide is not None:
+                start, goal, began = self.glide
+                self.tip = glided(start, goal, (now - began) / GLIDE_S)
+                if now - began >= GLIDE_S:
+                    self.glide = None
+            wanted = 1 if now - self.last < IDLE_S else 0
+            self.alpha = theme.step(self.alpha, wanted, elapsed, theme.CONTENT_MS if self.moving else 0)
+            self.starts = [b for b in self.starts if now - b < RING_S]
+            tip, alpha, above, ripple = self.tip, self.alpha, self.above, rings(self.starts, now)
+            if alpha == 0 and not wanted:
+                self.tip = None
+        if self.held or alpha == 0 or not self.frame.argb and alpha < 0.5:
+            self.hide()
+            return
+        self._show(tip, alpha, ripple, above, now)
+
+    def _show(self, tip, alpha, ripple, above, now):
+        d = self.x.d
+        if not self.w:
+            self.w = self.frame.window(self.frame.argb)
+            xlib.XStoreName(d, self.w, b"KnightSight cursor")
+        drawn = (round(alpha, 2), tuple((round(r), round(o, 2)) for r, o in ripple))
+        if drawn != self.drawn:
+            self.img = self._render(alpha, ripple)
+            if not self.frame.argb:
+                self.frame.cut(self.w, self.img)
+            self.drawn = drawn
+        spot = (round(tip[0]) - CURSOR_TIP, round(tip[1]) - CURSOR_TIP)
+        if spot != self.spot:
+            xlib.XMoveResizeWindow(d, self.w, *spot, CURSOR_SIZE, CURSOR_SIZE)
+            self.spot = spot
+        if not self.mapped:
+            xlib.XMapWindow(d, self.w)
+            self.mapped = True
+            self.restacked = 0.0
+        if now - self.restacked > RESTACK_S:
+            self.restacked = now
+            if above:
+                changes = xlib.XWindowChanges(sibling=above, stack_mode=xlib.Above)
+                xlib.XConfigureWindow(d, self.w, xlib.CWSibling | xlib.CWStackMode, byref(changes))
+            else:
+                xlib.XRaiseWindow(d, self.w)
+        # Drawn again every tick, since without a compositor a window forgets its pixels
+        # wherever another one covered it.
+        self.frame.put(self.w, self.img, self.frame.argb)
+        self.x.failed()
+
+    def _render(self, alpha, ripple):
+        img = cairo.ImageSurface(cairo.FORMAT_ARGB32, CURSOR_SIZE, CURSOR_SIZE)
+        ctx = cairo.Context(img)
+        ctx.push_group()
+        ctx.set_line_width(2)
+        for radius, opacity in ripple:
+            ctx.arc(CURSOR_TIP, CURSOR_TIP, radius, 0, 2 * math.pi)
+            ctx.set_source_rgba(*theme.rgb(theme.ACCENT), opacity)
+            ctx.stroke()
+        ctx.translate(CURSOR_TIP, CURSOR_TIP)
+        ctx.set_line_join(cairo.LINE_JOIN_MITER)
+        if self.frame.argb:
+            for spread in (4, 2.5, 1):
+                self._arrow(ctx, 0.8, 1.6)
+                ctx.set_source_rgba(0, 0, 0, 0.07)
+                ctx.set_line_width(spread * 2)
+                ctx.stroke_preserve()
+                ctx.fill()
+        self._arrow(ctx, 0, 0)
+        ctx.set_source_rgb(*theme.rgb(theme.ACCENT))
+        ctx.fill_preserve()
+        ctx.set_source_rgb(*theme.rgb(CURSOR_INK))
+        ctx.set_line_width(1.5)
+        ctx.stroke()
+        ctx.pop_group_to_source()
+        ctx.paint_with_alpha(alpha if self.frame.argb else 1)
+        img.flush()
+        return img
+
+    @staticmethod
+    def _arrow(ctx, dx, dy):
+        ctx.move_to(ARROW[0][0] + dx, ARROW[0][1] + dy)
+        for x, y in ARROW[1:]:
+            ctx.line_to(x + dx, y + dy)
+        ctx.close_path()
+
+    def inside(self, r):
+        if not self.mapped:
+            return False
+        x, y = self.spot
+        return x < r.right and x + CURSOR_SIZE > r.x and y < r.bottom and y + CURSOR_SIZE > r.y
+
+    def hold(self):
+        """Keeps the arrow off the screen for a shot, until let_go."""
+        self.held += 1
+        self.hide()
+
+    def let_go(self):
+        self.held -= 1
+
+    def hide(self):
+        if self.mapped:
+            xlib.XUnmapWindow(self.x.d, self.w)
+            xlib.XSync(self.x.d, False)
+            self.mapped = False
+
+    def vanish(self):
+        """Hides the arrow at once, so it fades in again at the next action."""
+        with self.lock:
+            self.tip, self.glide, self.starts, self.alpha = None, None, [], 0.0
+        self.hide()

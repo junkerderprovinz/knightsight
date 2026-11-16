@@ -7,12 +7,13 @@ gnome-text-editor: tests/smoke-wayland.sh sets them up.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 import unittest
 
-from harness import LINUX, Mcp, image_of, listening, pixbuf, pixel_of, spawn, stop_all, text_of, wait_for
+from harness import LINUX, Mcp, ask, image_of, listening, pixbuf, pixel_of, spawn, stop_all, text_of, wait_for
 
 import gi
 
@@ -103,7 +104,7 @@ def describe(a):
         names = [actions.get_action_name(i) for i in range(actions.get_n_actions())] if actions else []
         r = a.get_extents(Atspi.CoordType.WINDOW)
         states = [s.value_nick for s in a.get_state_set().get_states()
-                  if s.value_nick in ("checked", "selected", "sensitive")]
+                  if s.value_nick in ("checked", "selected", "sensitive", "enabled", "editable", "showing")]
         return f"{a.get_role_name()} {a.get_name()!r} {names} {states} {(r.x, r.y, r.width, r.height)}"
     except GLib.Error as e:
         return f"gone ({e.message})"
@@ -167,9 +168,9 @@ class SmokeWayland(unittest.TestCase):
         cls.notes = os.path.join(OUT, "notes.txt")
         with open(cls.notes, "w") as f:
             f.write("Shopping list\n\nBread\nCheese\nApples\n")
-        start("editor", "gnome-text-editor", "--standalone", "--ignore-session", cls.notes)
+        cls.editor = start("editor", "gnome-text-editor", "--standalone", "--ignore-session", cls.notes)
         wait_for(lambda: window(EDITOR), "the text editor", 60)
-        place(EDITOR, 10, 60, 640, 480)
+        place(EDITOR, 10, 60, 520, 480)
 
         env = dict(os.environ, PYTHONPATH=LINUX, PYTHONFAULTHANDLER="1")
         cls.panel = start("panel", sys.executable, "-m", "knightsight", env=env)
@@ -177,7 +178,7 @@ class SmokeWayland(unittest.TestCase):
         if cls.panel.poll() is not None:
             raise AssertionError(f"the panel exited with {cls.panel.returncode}")
         wait_for(lambda: window(KNIGHTSIGHT), "the KnightSight window", 30)
-        place(KNIGHTSIGHT, 670, 60)
+        place(KNIGHTSIGHT, 550, 60)
         time.sleep(1)
         cls.mcp = Mcp()
 
@@ -192,6 +193,18 @@ class SmokeWayland(unittest.TestCase):
         fx, fy, fw, fh = window(KNIGHTSIGHT)["frame"]
         shot = screenshot(name, (fx, fy, fw, fh))
         return pixel_of(shot, panel.CARD[0] + 1, panel.BAR + panel.CARD[3] // 2)
+
+    def text_view(self):
+        """The editor's text, which the test reads the caret from."""
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if app is None or app.get_process_id() != self.editor.pid:
+                continue
+            for a, _ in tree(app):
+                if a.get_role_name() == "text" and a.get_state_set().contains(Atspi.StateType.EDITABLE):
+                    return a
+        return None
 
     def share_in_dialog(self):
         """Picks the editor in the desktop's dialog and confirms it."""
@@ -210,19 +223,41 @@ class SmokeWayland(unittest.TestCase):
         press(find(app, ("push button", "button"), "Share", pressable=True))
         wait_for(lambda: app.get_child_count() == 0, "the dialog to close", 20)
 
-    def tearDown(self):
-        evidence("end")
+    def share_screen_in_dialog(self):
+        """Confirms the screen the desktop's dialog chose, the only one there is, or skips the
+        test where the dialog leaves nothing to share."""
+        app = wait_for(portal, "the portal", 30)
+        wait_for(lambda: find(app, ("push button", "button"), "Share", pressable=True), "the Share button", 30)
+        dump(app, "dialog-screen.txt")
+        remote = find(app, ("check box", "switch"), "Allow Remote Interaction", pressable=True)
+        if not remote.get_state_set().contains(Atspi.StateType.CHECKED):
+            press(remote)
+        time.sleep(0.5)
+        app = wait_for(portal, "the portal", 10)
+        dump(app, "dialog-screen-chosen.txt")
+        screenshot("dialog-screen-chosen.png")
+        share = find(app, ("push button", "button"), "Share", pressable=True)
+        if share is None or not share.get_state_set().contains(Atspi.StateType.SENSITIVE):
+            cancel = find(app, ("push button", "button"), "Cancel", pressable=True)
+            if cancel is not None:
+                press(cancel)
+            self.skipTest("the portal's dialog offers no screen to pick")
+        press(share)
+        wait_for(lambda: app.get_child_count() == 0, "the dialog to close", 20)
 
-    def test_window_share(self):
+    def tearDown(self):
+        evidence(self.id().rsplit(".", 1)[-1])
+
+    def test_a_window_share(self):
         self.assertIn(NOTHING, text_of(self.mcp.tool("look")))
 
-        self.panel_click(280, 138)
+        self.panel_click(379, 176)
         self.share_in_dialog()
         # The finder takes a new picture once a second, and the first frame may come late.
         time.sleep(2.5)
         self.assertEqual(self.card_edge("panel-chosen.png"), theme.NEUTRAL)
 
-        self.panel_click(397, 188)
+        self.panel_click(571, 234)
         wait_for(lambda: NOTHING not in text_of(self.mcp.tool("look")), "the share to start", 10)
         time.sleep(1)
         # Lit in the accent colour, or on its way to the warning colour while requests come in.
@@ -240,8 +275,25 @@ class SmokeWayland(unittest.TestCase):
         self.assertTrue(editor["frame"][2] <= width <= editor["buffer"][2], f"the picture is {width} wide, {editor}")
         self.assertTrue(editor["frame"][3] <= height <= editor["buffer"][3], f"the picture is {height} high, {editor}")
 
-        self.assertIn("Clicked", text_of(self.mcp.tool("click", x=width // 2, y=height // 2)))
+        lines = re.findall(r"^e\d+ .*$", text_of(shot), re.M)
+        with log("look-controls.txt") as f:
+            f.write("\n".join(lines) + "\n")
+        print("The look listed:", *lines, sep="\n  ", flush=True)
+        controls = [re.match(r'(e\d+) (\w+)(?: "(.*)")? at (\d+), (\d+), (\d+) x (\d+)$', line).groups() for line in lines]
+        fields = [c for c in controls if c[1] == "edit"]
+        if not fields:
+            begun = time.monotonic()
+            raw = ask(cmd="look")
+            self.fail(f"no field among the controls of a look, which took {time.monotonic() - begun:.1f} s "
+                      f"and sent {raw.get('elements', 'no elements')}")
+        field = max(fields, key=lambda c: int(c[5]) * int(c[6]))
+
+        # Clicked by its ref, the text below the last line puts the caret at the end.
+        view = wait_for(self.text_view, "the editor's text in the accessibility tree", 10)
+        before = Atspi.Text.get_caret_offset(view)
+        self.assertIn("Clicked", text_of(self.mcp.tool("click", ref=field[0])))
         wait_for(lambda: window(EDITOR)["focus"], "the editor to get the focus", 5)
+        wait_for(lambda: Atspi.Text.get_caret_offset(view) != before, "the click by ref to move the caret", 5)
         for step in (self.mcp.tool("key", keys="ctrl+end"), self.mcp.tool("type", text="\n" + LINE),
                      self.mcp.tool("key", keys="ctrl+s")):
             self.assertNotIn("isError", step, text_of(step))
@@ -253,6 +305,33 @@ class SmokeWayland(unittest.TestCase):
         wait_for(saved, "the editor to save the typed line", 10)
         self.assertIn("outside the share", text_of(self.mcp.tool("click", x=width + 40, y=height // 2)))
         screenshot("screen-end.png")
+        with open(os.path.join(OUT, "panel.log")) as f:
+            self.assertNotIn("Traceback", f.read())
+
+    def test_screen_share(self):
+        if NOTHING not in text_of(self.mcp.tool("look")):
+            self.panel_click(571, 234)
+            wait_for(lambda: NOTHING in text_of(self.mcp.tool("look")), "the share to end", 10)
+
+        self.panel_click(621, 176)
+        self.share_screen_in_dialog()
+        time.sleep(2.5)
+        self.panel_click(571, 234)
+        wait_for(lambda: NOTHING not in text_of(self.mcp.tool("look")), "the share to start", 10)
+
+        shot = self.mcp.tool("look")
+        picture = pixbuf(image_of(shot))
+        picture.savev(os.path.join(OUT, "look-screen.png"), "png", [], [])
+        self.assertRegex(text_of(shot), r"Screen( 1)? \(1280 x 800\), 1280 x 800")
+        self.assertEqual((picture.get_width(), picture.get_height()), (1280, 800))
+
+        fx, fy, _, _ = window(KNIGHTSIGHT)["frame"]
+        self.assertIn("lies on KnightSight itself", text_of(self.mcp.tool("click", x=fx + 100, y=fy + 100)))
+        fx, fy, fw, fh = window(EDITOR)["frame"]
+        self.assertIn("Clicked", text_of(self.mcp.tool("click", x=fx + fw // 2, y=fy + fh // 2)))
+
+        self.panel_click(571, 234)
+        wait_for(lambda: NOTHING in text_of(self.mcp.tool("look")), "the share to end", 10)
         with open(os.path.join(OUT, "panel.log")) as f:
             self.assertNotIn("Traceback", f.read())
 

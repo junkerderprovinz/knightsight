@@ -143,6 +143,7 @@ struct Rgb: CustomStringConvertible {
     var description: String { "(\(r), \(g), \(b))" }
     var red: Bool { r > 200 && g < 80 && b < 80 }
     var white: Bool { r > 235 && g > 235 && b > 235 }
+    var yellow: Bool { r > 220 && (150...230).contains(g) && b < 100 }
 }
 
 func pixel(_ png: Data, _ p: CGPoint) -> Rgb {
@@ -153,6 +154,21 @@ func pixel(_ png: Data, _ p: CGPoint) -> Rgb {
 
 struct ToolReply {
     let text: String, image: Data?, isError: Bool
+}
+
+/// A control as the MCP server lists it after a look, with its box in the picture.
+struct Listed {
+    let ref: String, role: String, name: String, box: CGRect
+}
+
+func controls(_ reply: ToolReply) -> [Listed] {
+    let line = try! NSRegularExpression(pattern: #"^(e\d+) (\w+)(?: "(.*)")? at (\d+), (\d+), (\d+) x (\d+)$"#, options: .anchorsMatchLines)
+    let text = reply.text as NSString
+    return line.matches(in: reply.text, range: NSRange(location: 0, length: text.length)).map { match in
+        func group(_ i: Int) -> String { match.range(at: i).location == NSNotFound ? "" : text.substring(with: match.range(at: i)) }
+        let n = (4...7).map { CGFloat(Int(group($0))!) }
+        return Listed(ref: group(1), role: group(2), name: group(3), box: CGRect(x: n[0], y: n[1], width: n[2], height: n[3]))
+    }
 }
 
 /// The real MCP server over stdio, one JSON-RPC line each way.
@@ -237,9 +253,17 @@ func run(_ mcp: Mcp) throws {
 
     try spawn("/usr/bin/open", ["--stdout", out.appendingPathComponent("app.log").path,
                                 "--stderr", out.appendingPathComponent("app.log").path, appPath]).waitUntilExit()
-    let panel = try window("KnightSight", owner: "KnightSight")
+    var panel = try window("KnightSight", owner: "KnightSight")
+    // Up against the menu bar, so the target fits below the panel and above the Dock.
+    let menuBar = NSScreen.screens[0].frame.maxY - NSScreen.screens[0].visibleFrame.maxY
+    if menuBar < panel.bounds.minY, let w = (attribute(AXUIElementCreateApplication(panel.pid), kAXWindowsAttribute) as? [AXUIElement])?.first {
+        var top = CGPoint(x: panel.bounds.minX, y: menuBar)
+        AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &top)!)
+        let id = panel.id
+        panel = try wait("the panel to move up", 5) { onScreen().first { $0.id == id && $0.bounds.minY <= menuBar + 1 } }
+    }
 
-    // Below the panel, which opens in the middle of the screen, so neither hides the other.
+    // Below the panel, so neither hides the other.
     try spawn(targetPath, ["Target", "ff0000", "40", "\(Int(panel.bounds.maxY) + 20)", eventsPath])
     var shared = try window("Target")
     try expect(shared.bounds.width == 400, "the target is 400 points wide", "\(shared.bounds)")
@@ -247,6 +271,7 @@ func run(_ mcp: Mcp) throws {
     say("      panel at \(panel.bounds), target at \(shared.bounds)")
     func onPanel(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: panel.bounds.minX + x, y: panel.bounds.minY + y) }
     func edges() -> [Win] { onScreen().filter { $0.pid == panel.pid && min($0.bounds.width, $0.bounds.height) <= 8 } }
+    func arrow() -> Win? { onScreen().first { $0.pid == panel.pid && $0.bounds.size == CGSize(width: 60, height: 60) } }
 
     let before = try wait("the panel's port", 30) { () -> ToolReply? in
         let reply = try mcp.tool("look")
@@ -257,7 +282,7 @@ func run(_ mcp: Mcp) throws {
     let band = CGPoint(x: shared.bounds.minX + 200, y: shared.bounds.minY + titleBar + 50)
     var chosen = false
     for _ in 1...3 where !chosen {
-        press(onPanel(280, 138))
+        press(onPanel(379, 176))
         press(band)
         chosen = (try? wait("the frame", 5) { edges().count == 4 ? true : nil }) ?? false
     }
@@ -266,7 +291,7 @@ func run(_ mcp: Mcp) throws {
 
     var first: ToolReply?
     for _ in 1...3 where first == nil {
-        press(onPanel(397, 188))
+        press(onPanel(571, 234))
         first = try? wait("the share to start", 5) { () -> ToolReply? in
             let reply = try mcp.tool("look")
             return reply.text.contains(nothingShared) ? nil : reply
@@ -287,6 +312,14 @@ func run(_ mcp: Mcp) throws {
     func inPicture(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * scale, y: (titleBar + y) * scale) }
     try expect(pixel(look.image!, inPicture(50, 50)).red, "the band shows red", "\(pixel(look.image!, inPicture(50, 50)))")
     try expect(pixel(look.image!, inPicture(50, 150)).white, "the text area shows white", "\(pixel(look.image!, inPicture(50, 150)))")
+
+    let go = CGRect(x: 310, y: 10, width: 80, height: 30)
+    func goButton(_ reply: ToolReply) -> Listed? { controls(reply).first { $0.role == "button" && $0.name == "Go" } }
+    let listed = goButton(look)
+    check(listed != nil, "look lists the Go button with a ref", look.text)
+    check(listed.map { $0.box.contains(inPicture(go.midX, go.midY)) } ?? false, "the Go button is listed where it shows",
+          "listed at \(listed.map { "\($0.box)" } ?? "nowhere"), the button covers \(go) in points")
+    check(controls(look).contains { $0.role == "edit" }, "look lists the text area as an edit field", look.text)
 
     let frame = edges().map(\.bounds).reduce(CGRect.null) { $0.union($1) }
     let width = shared.bounds.minX - frame.minX
@@ -325,7 +358,9 @@ func run(_ mcp: Mcp) throws {
     let arrived = try? wait("the text", 5) { text(of: shared.pid) == hello ? true : nil }
     check(arrived ?? false, "the typed text arrives in the target", "the text area holds \(text(of: shared.pid) ?? "nothing")")
     check(frontmost() == "Other" && pointer == rest, "typing leaves the front and the pointer alone", "\(frontmost()), \(pointer)")
-    try save(try mcp.tool("look"), "3-typed.png")
+    let afterTyping = try mcp.tool("look")
+    try save(afterTyping, "3-typed.png")
+    check(!afterTyping.text.contains(hello), "a look never lists what is typed into a field", afterTyping.text)
 
     let click = try mcp.tool("click", at(2, 111))
     check(click.text == "Clicked, briefly in the foreground.", "click is done in the foreground for a moment", click.text)
@@ -335,6 +370,36 @@ func run(_ mcp: Mcp) throws {
     check(caret ?? false, "a click at the start of the text puts the caret there",
           "the selection is \(selection(of: shared.pid).map { "\($0.location) + \($0.length)" } ?? "unknown")")
     settled(after: "the click")
+
+    if let ref = goButton(try mcp.tool("look"))?.ref {
+        let byRef = try mcp.tool("click", ["ref": ref])
+        check(byRef.text == "Clicked, briefly in the foreground.", "a click by ref is done like any click", byRef.text)
+        check((try? wait("the press", 3) { events().contains("Target pressed Go") ? true : nil }) ?? false,
+              "a click by ref presses the Go button", events().suffix(5).joined(separator: ", "))
+        let landed = events().last { $0.hasPrefix("Target click ") }.map { $0.split(separator: " ").compactMap { Double($0) } }
+        check(landed.map { $0.count == 2 && go.contains(CGPoint(x: $0[0], y: $0[1])) } ?? false,
+              "a click by ref lands inside the button", "the last click on the target was \(landed.map { "\($0)" } ?? "none")")
+        settled(after: "the click by ref")
+
+        let stacked = try? wait("the arrow right above the target", 3) { () -> Bool? in
+            let order = onScreen().map(\.id)
+            guard let a = arrow(), let i = order.firstIndex(of: a.id), let t = order.firstIndex(of: shared.id),
+                  let o = order.firstIndex(of: other.id) else { return nil }
+            return o < i && i < t ? true : nil
+        }
+        check(stacked ?? false, "the assistant's arrow lies above the target and below the window in front",
+              "arrow \(arrow().map { "\($0.bounds)" } ?? "missing"), order \(onScreen().map(\.name))")
+        let button = go.offsetBy(dx: shared.bounds.minX, dy: shared.bounds.minY + titleBar)
+        check(arrow().map { button.contains(CGPoint(x: $0.bounds.midX, y: $0.bounds.midY)) } ?? false,
+              "the arrow points at the Go button", "arrow \(arrow().map { "\($0.bounds)" } ?? "missing"), button \(button)")
+        let withArrow = try mcp.tool("look")
+        try save(withArrow, "3-arrow.png")
+        let under = withArrow.image.map { pixel($0, inPicture(go.midX + 3, go.midY + 10)) }
+        check(under.map { !$0.yellow } ?? false, "the arrow stays out of the look", "\(under.map { "\($0)" } ?? "no picture")")
+        snap("3-arrow-screen.png")
+    } else {
+        check(false, "a fresh look lists the Go button to click by ref")
+    }
 
     let all = try mcp.tool("key", ["keys": "cmd+a"])
     check(all.text == "Pressed, briefly in the foreground.", "cmd+a is done in the foreground for a moment", all.text)
@@ -367,6 +432,9 @@ func run(_ mcp: Mcp) throws {
 
     let outside = try mcp.tool("click", ["x": size.pixelsWide + 20, "y": 10])
     check(outside.isError && outside.text.contains("outside the share"), "a click outside the share is refused", outside.text)
+    let stale = try mcp.tool("click", ["ref": "e999"])
+    check(stale.isError && stale.text.contains("There is no element e999") && stale.text.contains("safe to try again"),
+          "a ref the last look did not list is refused", stale.text)
     let windowsKey = try mcp.tool("key", ["keys": "win+r"])
     check(windowsKey.isError && windowsKey.text.contains("no Windows key"), "the Windows key is refused", windowsKey.text)
     check(events().filter { $0.hasPrefix("Other") }.count == otherEvents, "nothing reached the covering window",
@@ -397,6 +465,55 @@ func run(_ mcp: Mcp) throws {
     keys(7, [.maskControl, .maskAlternate, .maskShift])
     let ended = try? wait("the hotkey to end the share", 5) { try mcp.tool("look").text.contains(nothingShared) ? true : nil }
     check(ended ?? false, "ctrl+option+shift+x ends the share")
+
+    let display = CGDisplayBounds(CGMainDisplayID())
+    func sheets() -> [Win] { onScreen().filter { $0.pid == panel.pid && $0.bounds == display } }
+    var picked = false
+    for _ in 1...3 where !picked {
+        press(onPanel(621, 176))
+        guard (try? wait("the screen picker", 5) { sheets().isEmpty ? nil : true }) != nil else { continue }
+        snap("8-picker.png")
+        press(CGPoint(x: display.midX, y: display.midY))
+        picked = (try? wait("the picker to close", 5) { sheets().isEmpty ? true : nil }) ?? false
+    }
+    try expect(picked, "the Screen button opens the screen picker and a click chooses the screen")
+
+    var whole: ToolReply?
+    for _ in 1...3 where whole == nil {
+        press(onPanel(571, 234))
+        whole = try? wait("the screen share to start", 5) { () -> ToolReply? in
+            let reply = try mcp.tool("look")
+            return reply.text.contains(nothingShared) ? nil : reply
+        }
+    }
+    guard let screenLook = whole, let screenPng = screenLook.image else { throw Failure("sharing the screen did not start") }
+    try save(screenLook, "8-screen.png")
+    let picture = NSBitmapImageRep(data: screenPng)!
+    let density = CGDisplayCopyDisplayMode(CGMainDisplayID()).map { CGFloat($0.pixelWidth) / CGFloat($0.width) } ?? 1
+    let k = min(density, 1568 / max(display.width, display.height))
+    let fits = (width: Int((display.width * k).rounded()), height: Int((display.height * k).rounded()))
+    check(screenLook.text.contains("Screen 1 (\(Int(display.width)) x \(Int(display.height))), \(picture.pixelsWide) x \(picture.pixelsHigh)"),
+          "the reply names the screen by number and size", screenLook.text)
+    check(picture.pixelsWide == fits.width && picture.pixelsHigh == fits.height, "the look of the screen has the screen's size",
+          "\(picture.pixelsWide) x \(picture.pixelsHigh), expected \(fits.width) x \(fits.height) for \(display) at \(density)")
+    func onScreenShare(_ p: CGPoint) -> [String: Any] { ["x": Double(p.x * k), "y": Double(p.y * k)] }
+
+    let onPanelClick = try mcp.tool("click", onScreenShare(onPanel(100, 100)))
+    check(onPanelClick.isError && onPanelClick.text.contains("That point lies on KnightSight itself."),
+          "a click on the panel is refused", onPanelClick.text)
+
+    let target = try window("Target")
+    let spot = CGPoint(x: target.bounds.minX + 50, y: target.bounds.minY + titleBar + 20)
+    let screenClick = try mcp.tool("click", onScreenShare(spot))
+    check(screenClick.text == "Clicked, briefly in the foreground.", "a click in the shared screen lands", screenClick.text)
+    let shown = try? wait("the arrow over the screen", 3) { arrow() }
+    check(shown != nil, "the arrow shows where the click went")
+    let pictured = try mcp.tool("look")
+    try save(pictured, "9-screen-arrow.png")
+    snap("9-screen-arrow-screen.png")
+    let fill = pictured.image.map { pixel($0, CGPoint(x: (spot.x + 3) * k, y: (spot.y + 10) * k)) }
+    check(fill.map { $0.red } ?? false, "a look of the screen leaves the arrow out", "\(fill.map { "\($0)" } ?? "no picture")")
+    keys(7, [.maskControl, .maskAlternate, .maskShift])
 }
 
 let mcp = try Mcp(mcpPath)

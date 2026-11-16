@@ -11,7 +11,7 @@ import time
 
 from gi.repository import Gdk, Gio, GLib
 
-from . import picture, protocol, say
+from . import elements, picture, protocol, say
 from .picker import RegionPicker
 from .pinboard import Pinboard
 from .protocol import Rect, Refused
@@ -28,6 +28,8 @@ CURSOR_HIDDEN = 1
 BTN_LEFT, BTN_RIGHT = 0x110, 0x111
 MODIFIER_KEYS = {"ctrl": "Control_L", "alt": "Alt_L", "shift": "Shift_L"}
 CANCELLED = 1
+# How long the pointer gets to reach a spot before KnightSight asks whether it lies on its own windows.
+SETTLE_S = 0.1
 
 
 def register(app_id):
@@ -99,6 +101,7 @@ class Share:
         self.devices = devices
         self.frames = frames
         self.region = None
+        self.screen = False
         self.title = say.CHOSEN_WINDOW
         # Keys go wherever the keyboard focus is, so they wait for a click into the share.
         self.clicked = False
@@ -208,22 +211,29 @@ class Desk:
     def stop_pick(self):
         pass
 
-    def pick_region(self, monitor, done):
-        """The desktop shares a whole screen, and the region is cut from its frames."""
+    def _screen(self, then, done):
+        """Has the desktop share a whole screen and hands then the share with its first frame."""
         def opened(share):
             started = time.monotonic()
 
             def first_frame():
                 frame = share.frames.frame()
-                if frame is None:
-                    if time.monotonic() - started < 5:
-                        return True
+                if frame is not None:
+                    then(share, frame)
+                elif time.monotonic() - started < 5:
+                    return True
+                else:
                     self._drop(share)
                     done(None, say.NO_PORTAL)
-                    return False
-                RegionPicker(frame.surface(), self._monitor(share) or monitor, picked).present()
                 return False
 
+            GLib.timeout_add(50, first_frame)
+
+        self._open(MONITOR, opened, self._failed(done))
+
+    def pick_region(self, monitor, done):
+        """The region is cut from the frames of a whole screen."""
+        def framed(share, frame):
             def picked(r):
                 if r is None:
                     self._drop(share)
@@ -234,13 +244,29 @@ class Desk:
                 self._adopt(share)
                 done(share, None)
 
-            GLib.timeout_add(50, first_frame)
+            number = self._monitor(share)
+            shared = monitor if number is None else Gdk.Display.get_default().get_monitors().get_item(number)
+            RegionPicker(frame.surface(), shared, picked).present()
 
-        self._open(MONITOR, opened, self._failed(done))
+        self._screen(framed, done)
+
+    def pick_screen(self, done):
+        """The desktop's dialog chooses the screen, which is then a region as large as its frames."""
+        def framed(share, frame):
+            share.region = Rect(0, 0, frame.width, frame.height)
+            width, height = share.props.get("size") or (frame.width, frame.height)
+            number = self._monitor(share)
+            share.title = say.screen(None if number is None else number + 1, width, height)
+            share.screen = True
+            self._adopt(share)
+            done(share, None)
+
+        self._screen(framed, done)
 
     @staticmethod
     def _monitor(share):
-        """The monitor the desktop says it shares, when it gives the position."""
+        """Where the monitor the desktop says it shares stands in the system's order, when the
+        desktop gives its position."""
         position, size = share.props.get("position"), share.props.get("size")
         if not position or not size:
             return None
@@ -248,7 +274,7 @@ class Desk:
         for i in range(monitors.get_n_items()):
             g = monitors.get_item(i).get_geometry()
             if (g.x, g.y, g.width, g.height) == (*position, *size):
-                return monitors.get_item(i)
+                return i
         return None
 
     def bind_hotkey(self, pressed):
@@ -339,8 +365,15 @@ class Desk:
         return self.still(share)
 
     def look(self, share):
-        reply = picture.encode(self.still(share))
+        shot = self.still(share)
+        reply = picture.encode(shot)
         reply["title"] = share.title
+        # The portal tells nothing about where a region's screen lies, so only a window is read.
+        if share.region is None:
+            size = (shot.get_width(), shot.get_height())
+            found = elements.controls(size, size)
+            if found is not None:
+                reply["elements"] = found
         return reply
 
     def _point(self, share, args, clicked=None):
@@ -362,7 +395,13 @@ class Desk:
     def _move(self, share, x, y):
         if not share.devices & POINTER:
             raise Refused("This desktop lets KnightSight look, but not click or type.")
-        self._notify(share, "NotifyPointerMotionAbsolute", "(oa{sv}udd)", share.node, x, y)
+        with protocol.delivering():
+            self._notify(share, "NotifyPointerMotionAbsolute", "(oa{sv}udd)", share.node, x, y)
+        # Wayland tells only the window under the pointer where it is, so KnightSight's own
+        # windows say whether the pointer came to rest on them.
+        time.sleep(SETTLE_S)
+        if self.panel.under_pointer:
+            raise Refused(protocol.ON_US)
 
     def click(self, share, args):
         x, y = self._point(share, args, self.panel.clicked)
@@ -370,11 +409,12 @@ class Desk:
         self._move(share, x, y)
         self.panel.busy()
         button = BTN_RIGHT if right else BTN_LEFT
-        for _ in range(2 if twice else 1):
-            self._notify(share, "NotifyPointerButton", "(oa{sv}iu)", button, 1)
-            time.sleep(0.03)
-            self._notify(share, "NotifyPointerButton", "(oa{sv}iu)", button, 0)
-            time.sleep(0.03)
+        with protocol.delivering():
+            for _ in range(2 if twice else 1):
+                self._notify(share, "NotifyPointerButton", "(oa{sv}iu)", button, 1)
+                time.sleep(0.03)
+                self._notify(share, "NotifyPointerButton", "(oa{sv}iu)", button, 0)
+                time.sleep(0.03)
         share.clicked = True
         return "Clicked. The desktop moved the pointer there."
 
@@ -383,7 +423,8 @@ class Desk:
         notches = round(protocol.number(args, "amount"))
         self._move(share, x, y)
         self.panel.busy()
-        self._notify(share, "NotifyPointerAxisDiscrete", "(oa{sv}ui)", 0, notches)
+        with protocol.delivering():
+            self._notify(share, "NotifyPointerAxisDiscrete", "(oa{sv}ui)", 0, notches)
         return "Scrolled. The desktop moved the pointer there."
 
     def _keys_allowed(self, share):
@@ -412,8 +453,9 @@ class Desk:
     def type(self, share, text):
         self._keys_allowed(share)
         self.panel.busy()
-        for key, is_char in protocol.text_keys(text):
-            self._stroke(share, [], Gdk.unicode_to_keyval(ord(key)) if is_char else Gdk.keyval_from_name(key))
+        with protocol.delivering():
+            for key, is_char in protocol.text_keys(text):
+                self._stroke(share, [], Gdk.unicode_to_keyval(ord(key)) if is_char else Gdk.keyval_from_name(key))
         return "Typed."
 
     def key(self, share, keys):
@@ -421,5 +463,6 @@ class Desk:
         self._keys_allowed(share)
         self.panel.busy()
         keysym = Gdk.unicode_to_keyval(ord(combo.key)) if combo.is_char else Gdk.keyval_from_name(combo.key)
-        self._stroke(share, combo.held, keysym)
+        with protocol.delivering():
+            self._stroke(share, combo.held, keysym)
         return "Pressed."

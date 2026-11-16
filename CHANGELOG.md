@@ -4,6 +4,20 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## Unreleased
+
+## ✨ Added
+
+- **Controls in every look.** A look lists the buttons, fields, links and other controls the system reports inside the share, each with a ref such as e12, and click and scroll take that ref instead of a point. What someone typed into a field and anything in a password field stay out.
+- **Wait for a control.** The new `wait` tool waits until a control with a given name shows up in the share and then returns a look, instead of looking again and again.
+- **Share a whole screen.** A new Screen button shares one monitor. On Wayland the system dialog chooses it. Clicks of the assistant on KnightSight itself are refused.
+- **See where your assistant acts.** A yellow pointer of its own glides to each spot before a click, a scroll or typing, with a small ripple on every click, and fades out when the work pauses. Your own pointer never moves for it. It lies right above the shared window, so it hides behind other windows like the window does, and the pictures your assistant gets leave it out. Wayland has no room for it, there the dot in the finder shows the last click.
+
+## ⚡ Improved
+
+- **Refusals say whether anything arrived.** When an action is refused after input went out, the reply says so, and your assistant looks before it tries again instead of clicking twice.
+- **The share stays with its window.** KnightSight remembers which program a shared window belongs to and when it started, so a window number the system hands on to another program never takes over the share.
+
 ## v1.2.0 (2026-11-16)
 
 A new panel with a finder, and minimized windows come back.

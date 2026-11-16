@@ -126,3 +126,60 @@ test('passes a refusal from the panel on as an error', async () => {
     assert.equal(result.content[0].text, 'Something broke.');
   });
 });
+
+const SHOT = {
+  ok: true, title: 'Quest Log', width: 600, height: 400, image: PNG,
+  elements: [
+    { ref: 'e1', role: 'edit', name: 'New quest', x: 20, y: 40, width: 400, height: 30 },
+    { ref: 'e2', role: 'button', name: 'Add', x: 430, y: 40, width: 60, height: 30 },
+  ],
+};
+
+test('lists the controls of a look with their refs', async () => {
+  await session(() => SHOT, async (c) => {
+    const { result } = await c.call('tools/call', { name: 'look', arguments: {} });
+    assert.match(result.content[0].text, /^Controls:$/m);
+    assert.match(result.content[0].text, /^e2 button "Add" at 430, 40, 60 x 30$/m);
+    assert.equal(result.content[1].type, 'image');
+  });
+});
+
+test('clicks an element by its ref', async () => {
+  await session(() => ({ ok: true, message: 'Clicked.' }), async (c, seen) => {
+    const { result } = await c.call('tools/call', { name: 'click', arguments: { ref: 'e2' } });
+    assert.equal(result.content[0].text, 'Clicked.');
+    assert.deepEqual(seen, [{ ref: 'e2', cmd: 'click' }]);
+  });
+});
+
+test('says whether a refused action may have reached the window', async () => {
+  await session(() => ({ ok: false, error: 'The point lies outside the share.' }), async (c) => {
+    const { result } = await c.call('tools/call', { name: 'click', arguments: { x: 900, y: 10 } });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /safe to try again/);
+  });
+  await session(() => ({ ok: false, error: 'The window stopped answering.', delivered: 'maybe' }), async (c) => {
+    const { result } = await c.call('tools/call', { name: 'type', arguments: { text: 'hi' } });
+    assert.match(result.content[0].text, /may have arrived\. Look before trying again\./);
+  });
+});
+
+test('waits until a control with the text shows up', async () => {
+  const answer = (request, n) => (n < 3 ? { ...SHOT, elements: [] } : SHOT);
+  await session(answer, async (c, seen) => {
+    const { result } = await c.call('tools/call', { name: 'wait', arguments: { text: 'add' } });
+    assert.match(result.content[0].text, /^Found e2 button "Add"/);
+    assert.equal(seen.length, 3);
+    assert.ok(seen.every((r) => r.cmd === 'look'));
+  });
+});
+
+test('gives up waiting for a control after the seconds it was given', async () => {
+  await session(() => ({ ...SHOT, elements: [] }), async (c) => {
+    const started = Date.now();
+    const { result } = await c.call('tools/call', { name: 'wait', arguments: { text: 'Delete', seconds: 1 } });
+    assert.ok(Date.now() - started < 4000);
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /within 1 second\./);
+  });
+});

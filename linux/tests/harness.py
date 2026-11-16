@@ -71,6 +71,13 @@ def listening():
         return s.connect_ex(("127.0.0.1", protocol.PORT)) == 0
 
 
+def ask(**request):
+    """One request straight to the panel's port, past the MCP server, with all of its reply."""
+    with socket.create_connection(("127.0.0.1", protocol.PORT)) as s:
+        s.sendall((json.dumps(request) + "\n").encode())
+        return json.loads(s.makefile().readline())
+
+
 class Mcp:
     def __init__(self):
         self.p = spawn("node", os.path.join(REPO, "mcp", "knightsight-mcp.mjs"), stdin=subprocess.PIPE,

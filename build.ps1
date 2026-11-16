@@ -8,6 +8,11 @@ $ErrorActionPreference = 'Stop'
 $sources = 'KnightSight.cs', 'LogoShapes.cs' | ForEach-Object { Join-Path $PSScriptRoot "src\$_" }
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $work = Join-Path $PSScriptRoot 'obj'
+# UI Automation ships with WPF, in a folder csc does not search by itself. WindowsBase brings
+# the rectangle type its bounds come in.
+$wpf = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\WPF'
+$automation = 'UIAutomationClient.dll', 'UIAutomationTypes.dll', 'WindowsBase.dll' | ForEach-Object { Join-Path $wpf $_ }
+$automationRefs = $automation | ForEach-Object { "/r:$_" }
 New-Item -ItemType Directory -Force $work, (Split-Path -Parent ([IO.Path]::GetFullPath($Out))) | Out-Null
 
 # Pinned to one commit of the Noto release site, so a rebuild gets the same files.
@@ -21,7 +26,7 @@ $fonts = foreach ($name in 'NotoSans-Regular.ttf', 'NotoSans-SemiBold.ttf') {
 $resources = $fonts | ForEach-Object { "/resource:$_,$(Split-Path $_ -Leaf)" }
 if ($Test) {
     $tests = Join-Path $work 'KnightSightTests.exe'
-    & $csc /nologo /target:exe /platform:anycpu /codepage:65001 "/out:$tests" /main:KnightSight.Tests /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @resources $sources (Join-Path $PSScriptRoot 'src\Tests.cs')
+    & $csc /nologo /target:exe /platform:anycpu /codepage:65001 "/out:$tests" /main:KnightSight.Tests /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @automationRefs @resources $sources (Join-Path $PSScriptRoot 'src\Tests.cs')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & $tests
     exit $LASTEXITCODE
@@ -32,7 +37,7 @@ $refs = @(
     [System.Windows.Forms.Form].Assembly.Location
     [System.Drawing.Bitmap].Assembly.Location
     [System.Web.Script.Serialization.JavaScriptSerializer].Assembly.Location
-)
+) + $automation
 # One piece of text for Add-Type, which works since LogoShapes.cs brings no usings of its own.
 Add-Type -TypeDefinition ((Get-Content -Raw -Encoding UTF8 $sources) -join "`n") -ReferencedAssemblies $refs
 $sizes = 16, 24, 32, 48, 64, 256
@@ -56,6 +61,6 @@ foreach ($image in $images) { $w.Write($image) }
 $w.Close()
 
 # AnyCPU without a preference for 32 bit, so one file runs on x64 and on ARM64 alike.
-& $csc /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 "/out:$Out" "/win32icon:$ico" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @resources $sources
+& $csc /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 "/out:$Out" "/win32icon:$ico" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @automationRefs @resources $sources
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 "built $Out"

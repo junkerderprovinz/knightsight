@@ -1,9 +1,14 @@
-"""Drags a rectangle over a still picture of one screen, filling that screen."""
+"""Drags a rectangle over a still picture of one screen, filling that screen, or chooses a
+whole screen."""
 
 import cairo
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, Gtk, Pango, PangoCairo
+
+from . import say, theme, widgets
+from .glyphs import rounded
 
 MIN_EDGE = 20
+OUTLINE = 6
 
 
 class RegionPicker(Gtk.Window):
@@ -98,3 +103,90 @@ class RegionPicker(Gtk.Window):
         self.finished = True
         self.done(chosen)
         self.destroy()
+
+
+class ScreenPicker:
+    """A window over each monitor with a still picture of it, dimmed, where a click shares that
+    monitor whole. The one under the pointer is outlined in the accent colour."""
+
+    def __init__(self, screens, done):
+        """screens are pairs of a monitor and its picture. done gets the index of the chosen
+        one, or None."""
+        self.done = done
+        self.hot = None
+        self.finished = False
+        self.font = widgets.font(20, True)
+        self.windows = [self._window(i, monitor, shot) for i, (monitor, shot) in enumerate(screens)]
+
+    def _window(self, i, monitor, shot):
+        window = Gtk.Window(decorated=False)
+        area = Gtk.DrawingArea(hexpand=True, vexpand=True)
+        area.set_draw_func(lambda _a, ctx, width, height: self.paint(ctx, width, height, shot, i == self.hot))
+        area.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+        window.set_child(area)
+
+        motion = Gtk.EventControllerMotion()
+        motion.connect("enter", lambda *_: self.point(i))
+        motion.connect("motion", lambda *_: self.point(i))
+        motion.connect("leave", lambda *_: self.point(None) if self.hot == i else None)
+        area.add_controller(motion)
+        click = Gtk.GestureClick(button=0)
+        # On the release, so it does not fall on the window below once the picker is gone.
+        click.connect("released", lambda g, *_: self.result(i if g.get_current_button() == Gdk.BUTTON_PRIMARY else None))
+        area.add_controller(click)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", lambda _c, key, *_: key == Gdk.KEY_Escape and self.result(None))
+        window.add_controller(keys)
+        window.connect("close-request", lambda _w: self.result(None) or False)
+        window.fullscreen_on_monitor(monitor)
+        return window
+
+    def present(self):
+        for window in self.windows:
+            window.present()
+
+    def point(self, i):
+        if i != self.hot:
+            self.hot = i
+            for window in self.windows:
+                window.get_child().queue_draw()
+
+    def paint(self, ctx, width, height, shot, hot):
+        k = min(width / shot.get_width(), height / shot.get_height())
+        ctx.set_source_rgb(0, 0, 0)
+        ctx.paint()
+        ctx.save()
+        ctx.translate((width - shot.get_width() * k) / 2, (height - shot.get_height() * k) / 2)
+        ctx.scale(k, k)
+        ctx.set_source_surface(shot)
+        ctx.paint()
+        ctx.restore()
+        ctx.set_source_rgba(0, 0, 0, 0.4)
+        ctx.paint()
+
+        layout = PangoCairo.create_layout(ctx)
+        layout.set_font_description(self.font)
+        layout.set_text(say.SCREEN_HINT, -1)
+        layout.set_alignment(Pango.Alignment.CENTER)
+        tw, th = layout.get_pixel_size()
+        pw, ph = tw + 48, th + 28
+        rounded(ctx, (width - pw) / 2, (height - ph) / 2, pw, ph, 10)
+        ctx.set_source_rgba(0, 0, 0, 0.6)
+        ctx.fill()
+        ctx.set_source_rgb(1, 1, 1)
+        ctx.move_to((width - tw) / 2, (height - th) / 2)
+        PangoCairo.show_layout(ctx, layout)
+
+        if hot:
+            ctx.set_source_rgb(*theme.rgb(theme.ACCENT))
+            ctx.set_line_width(OUTLINE)
+            ctx.rectangle(OUTLINE / 2, OUTLINE / 2, width - OUTLINE, height - OUTLINE)
+            ctx.stroke()
+
+    def result(self, chosen):
+        if self.finished:
+            return
+        self.finished = True
+        self.done(chosen)
+        for window in self.windows:
+            window.destroy()

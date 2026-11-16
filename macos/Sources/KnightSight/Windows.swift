@@ -93,6 +93,18 @@ enum Windows {
     }
 }
 
+enum Processes {
+    /// When the process started, in microseconds since 1970, or nil once it is gone.
+    static func started(_ pid: pid_t) -> Int64? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Int64(start.tv_sec) * 1_000_000 + Int64(start.tv_usec)
+    }
+}
+
 enum Screens {
     static var mainHeight: CGFloat { CGDisplayBounds(CGMainDisplayID()).height }
 

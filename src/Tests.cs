@@ -3,10 +3,14 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Web.Script.Serialization;
+using System.Windows.Automation;
+using System.Windows.Forms;
 
 namespace KnightSight
 {
@@ -316,6 +320,214 @@ namespace KnightSight
             using (var bmp = new Bitmap(100, 100)) page = Board.Page(board.Seal(bmp, 1, "t", DateTime.UtcNow));
             True(page.Contains(">1a<") && page.Contains(">1b<"), "both labels are on the page");
             Same(3, page.Split(new[] { "data:image/png;base64," }, StringSplitOptions.None).Length - 1);
+        }
+
+        static Element Found(string role, string name, int x, int y, int width, int height)
+        {
+            return new Element { Role = role, Name = name, Box = new Rectangle(x, y, width, height) };
+        }
+
+        static string RefusalOf(Action act)
+        {
+            try { act(); }
+            catch (Refused e) { return e.Message; }
+            throw new Exception("was not refused");
+        }
+
+        static void ControlTypesMapOntoTheClosedSetOfRoles()
+        {
+            Same("button", ControlTree.Role(ControlType.Button));
+            Same("button", ControlTree.Role(ControlType.SplitButton));
+            Same("link", ControlTree.Role(ControlType.Hyperlink));
+            Same("edit", ControlTree.Role(ControlType.Edit));
+            Same("checkbox", ControlTree.Role(ControlType.CheckBox));
+            Same("radio", ControlTree.Role(ControlType.RadioButton));
+            Same("combobox", ControlTree.Role(ControlType.ComboBox));
+            Same("menuitem", ControlTree.Role(ControlType.MenuItem));
+            Same("tab", ControlTree.Role(ControlType.TabItem));
+            Same("listitem", ControlTree.Role(ControlType.ListItem));
+            Same("treeitem", ControlTree.Role(ControlType.TreeItem));
+            Same("slider", ControlTree.Role(ControlType.Slider));
+            Same("text", ControlTree.Role(ControlType.Text));
+        }
+
+        static void ContainersAndPicturesHaveNoRole()
+        {
+            foreach (var type in new[] { ControlType.Pane, ControlType.Group, ControlType.Document, ControlType.Window, ControlType.Image, null })
+                Same(null, ControlTree.Role(type));
+        }
+
+        static void HiddenEmptyAndDisabledNamelessControlsAreLeftOut()
+        {
+            var box = new Rectangle(10, 10, 50, 20);
+            True(ControlTree.Pick(ControlType.Button, "Save", box, true, true, false) == null, "offscreen");
+            True(ControlTree.Pick(ControlType.Button, "Save", new Rectangle(10, 10, 0, 20), false, true, false) == null, "zero width");
+            True(ControlTree.Pick(ControlType.Button, "", box, false, false, false) == null, "disabled without a name");
+            True(ControlTree.Pick(ControlType.Text, " ", box, false, true, false) == null, "text without a name");
+            True(ControlTree.Pick(ControlType.Pane, "Main", box, false, true, false) == null, "a pane");
+            Same("Save", ControlTree.Pick(ControlType.Button, "Save", box, false, false, false).Name);
+            Same("", ControlTree.Pick(ControlType.Button, null, box, false, true, false).Name);
+        }
+
+        static void NamesAreTrimmedToOneShortLine()
+        {
+            var box = new Rectangle(0, 0, 5, 5);
+            Same("Save as file", ControlTree.Pick(ControlType.Button, "  Save as\r\n  file ", box, false, true, false).Name);
+            Same(80, ControlTree.Pick(ControlType.Text, new string('x', 200), box, false, true, false).Name.Length);
+        }
+
+        static void PasswordFieldShowsOnlyItsRole()
+        {
+            var field = ControlTree.Pick(ControlType.Edit, "hunter2", new Rectangle(0, 0, 100, 20), false, true, true);
+            Same("edit", field.Role);
+            Same("", field.Name);
+        }
+
+        static void ControlsComeInReadingOrderInPictureCoordinates()
+        {
+            var found = new List<Element>
+            {
+                Found("button", "OK", 500, 700, 100, 40),
+                Found("edit", "Search", 120, 220, 400, 30),
+                Found("text", "Status", 50, 760, 200, 20),
+                Found("link", "Away", 1000, 220, 50, 20),
+                Found("checkbox", "Wrap", 110, 220, 10, 10),
+            };
+            var listed = ControlTree.Arrange(found, new Rectangle(100, 200, 800, 600), 0.5);
+            Same(4, listed.Count);
+            Same("e1 Wrap {X=5,Y=10,Width=5,Height=5}", listed[0].Ref + " " + listed[0].Name + " " + listed[0].Box);
+            Same("e2 Search {X=10,Y=10,Width=200,Height=15}", listed[1].Ref + " " + listed[1].Name + " " + listed[1].Box);
+            Same("e3 OK {X=200,Y=250,Width=50,Height=20}", listed[2].Ref + " " + listed[2].Name + " " + listed[2].Box);
+            Same("e4 Status {X=0,Y=280,Width=75,Height=10}", listed[3].Ref + " " + listed[3].Name + " " + listed[3].Box);
+        }
+
+        static void LookListsAtMostAHundredAndFiftyControls()
+        {
+            var found = new List<Element>();
+            for (int i = 0; i < 200; i++) found.Add(Found("listitem", "Row " + i, 0, i * 10, 100, 10));
+            var listed = ControlTree.Arrange(found, new Rectangle(0, 0, 100, 2000), 1);
+            Same(150, listed.Count);
+            Same("e150", listed[149].Ref);
+            Same("Row 149", listed[149].Name);
+        }
+
+        static void ControlsSurviveTheJsonSerializer()
+        {
+            var listed = ControlTree.Arrange(new List<Element> { Found("button", "Add", 430, 40, 60, 30) }, new Rectangle(0, 0, 600, 400), 1);
+            var json = new JavaScriptSerializer().Serialize(listed.ConvertAll(e => e.Fields()));
+            Same("[{\"ref\":\"e1\",\"role\":\"button\",\"name\":\"Add\",\"x\":430,\"y\":40,\"width\":60,\"height\":30}]", json);
+        }
+
+        static void RefStandsForTheCentreOfItsControl()
+        {
+            var last = ControlTree.Arrange(new List<Element> { Found("button", "Add", 430, 40, 60, 31) }, new Rectangle(0, 0, 600, 400), 1);
+            var args = new Dictionary<string, object> { { "cmd", "click" }, { "ref", "e1" } };
+            Panel.Aim(args, last, "Click");
+            Same(460.0, args["x"]);
+            Same(55.5, args["y"]);
+        }
+
+        static void UnknownRefIsRefused()
+        {
+            var last = ControlTree.Arrange(new List<Element> { Found("button", "Add", 0, 0, 10, 10) }, new Rectangle(0, 0, 600, 400), 1);
+            var args = new Dictionary<string, object> { { "ref", "e12" } };
+            Same("There is no element e12 from the last look. Take a new look.", RefusalOf(() => Panel.Aim(args, last, "Click")));
+            True(!args.ContainsKey("x"), "no point was made up");
+        }
+
+        static void RefBeforeAnyLookIsRefused()
+        {
+            var args = new Dictionary<string, object> { { "ref", "e1" } };
+            Same("There is no element e1 from the last look. Take a new look.", RefusalOf(() => Panel.Aim(args, null, "Scroll")));
+        }
+
+        static void PointWithoutRefPassesAsItIs()
+        {
+            var args = new Dictionary<string, object> { { "x", 12 }, { "y", 34 } };
+            Panel.Aim(args, null, "Click");
+            Same(12, args["x"]);
+            Same(34, args["y"]);
+        }
+
+        static void ClickOrScrollWithoutPointOrRefIsRefused()
+        {
+            var click = new Dictionary<string, object>();
+            var scroll = new Dictionary<string, object> { { "x", 5 }, { "amount", 3 } };
+            Same("Click needs x and y or a ref from look.", RefusalOf(() => Panel.Aim(click, null, "Click")));
+            Same("Scroll needs x and y or a ref from look.", RefusalOf(() => Panel.Aim(scroll, null, "Scroll")));
+        }
+
+        static void ShareKnowsItsWindowByProcessAndStart()
+        {
+            var share = new Share { Pid = 42, Started = 131000000000000000 };
+            True(share.Owns(42, 131000000000000000), "same process, same start");
+            True(!share.Owns(42, 131000000000000001), "a new process under the old id");
+            True(!share.Owns(43, 131000000000000000), "another process");
+        }
+
+        static void ChosenWindowRemembersItsProcess()
+        {
+            using (var form = new Form())
+            {
+                var share = Share.Of(form.Handle);
+                using (var me = Process.GetCurrentProcess())
+                {
+                    Same((uint)me.Id, share.Pid);
+                    Same(me.StartTime.ToFileTimeUtc(), share.Started);
+                }
+                True(!share.Gone, "the window is still there");
+                form.Dispose();
+                True(share.Gone, "the window has closed");
+            }
+        }
+
+        static void ScreenTitleNamesItsNumberAndSize()
+        {
+            bool german = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de";
+            Same(german ? "Bildschirm 2 (2560 x 1440)" : "Screen 2 (2560 x 1440)", Say.ScreenTitle(2, new Size(2560, 1440)));
+        }
+
+        static void ScreenUnderThePointerIsTheOneChosen()
+        {
+            var screens = new[] { new Rectangle(0, 0, 1920, 1080), new Rectangle(-2560, -200, 2560, 1440) };
+            Same(0, ScreenPicker.Under(screens, new Point(1919, 1079)));
+            Same(1, ScreenPicker.Under(screens, new Point(-1, 0)));
+            Same(-1, ScreenPicker.Under(screens, new Point(1920, 500)));
+        }
+
+        static void PointOnThePanelIsRefused()
+        {
+            var own = new[] { new Rectangle(660, 418, 600, 244), new Rectangle(1300, 100, 320, 480) };
+            Same("That point lies on KnightSight itself.", RefusalOf(() => Panel.Clear(new Point(660, 418), own)));
+            Same("That point lies on KnightSight itself.", RefusalOf(() => Panel.Clear(new Point(1400, 300), own)));
+        }
+
+        static void PointBesideThePanelPasses()
+        {
+            var own = new[] { new Rectangle(660, 418, 600, 244) };
+            Panel.Clear(new Point(1260, 500), own);
+            Panel.Clear(new Point(700, 417), own);
+            Panel.Clear(new Point(700, 500), new Rectangle[0]);
+        }
+
+        static void InputThatWentOutCountsAsSent()
+        {
+            using (var form = new Form())
+            {
+                Input.Sent = false;
+                Input.PostText(form.Handle, "a");
+                True(Input.Sent, "a posted character counts");
+            }
+        }
+
+        static void InputThatNeverLeftCountsAsUnsent()
+        {
+            var form = new Form();
+            var gone = form.Handle;
+            form.Dispose();
+            Input.Sent = false;
+            RefusalOf(() => Input.PostText(gone, "a"));
+            True(!Input.Sent, "nothing was posted");
         }
     }
 }

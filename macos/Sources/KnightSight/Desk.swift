@@ -1,16 +1,28 @@
 import AppKit
+import ApplicationServices
 import KnightSightCore
 
 /// What the person chose: a window, or a region of the screen when window is nil.
 final class Chosen {
     let window: CGWindowID?
+    let owner: Owner?
     let region: CGRect
     let title: String
+    let screen: Bool
 
-    init(window: CGWindowID?, region: CGRect, title: String) {
+    init(window: CGWindowID?, owner: Owner? = nil, region: CGRect, title: String, screen: Bool = false) {
         self.window = window
+        self.owner = owner
         self.region = region
         self.title = title
+        self.screen = screen
+    }
+
+    /// The chosen window as it is now. A window whose number another process holds by now
+    /// counts as closed.
+    var current: WindowInfo? {
+        guard let window, let owner, let shared = Windows.info(window), owner.owns(shared.pid, startTime: Processes.started) else { return nil }
+        return shared
     }
 }
 
@@ -19,10 +31,12 @@ final class Session {
     private let lock = NSLock()
     private var storedChosen: Chosen?
     private var storedActive = false
+    private var storedSerial = 0
     private var storedDoing = ""
     private var storedLastRequest = Date.distantPast
     private var storedBusyUntil = Date.distantPast
     private var storedMarks: Set<CGWindowID> = []
+    private var storedOwn: [CGRect] = []
     private var storedPinboard = false
     private var storedFocus: WindowInfo?
     private var storedLent: (front: pid_t, holder: pid_t)?
@@ -36,13 +50,20 @@ final class Session {
 
     var chosen: Chosen? {
         get { locked { storedChosen } }
-        set { locked { storedChosen = newValue; storedFocus = nil } }
+        set { locked { storedChosen = newValue; storedFocus = nil; storedSerial += 1 } }
     }
 
     var active: Bool {
         get { locked { storedActive } }
-        set { locked { storedActive = newValue } }
+        set {
+            locked {
+                if newValue && !storedActive { storedSerial += 1 }
+                storedActive = newValue
+            }
+        }
     }
+
+    var serial: Int { locked { storedSerial } }
 
     var doing: String { locked { storedDoing } }
     var lastRequest: Date { locked { storedLastRequest } }
@@ -52,6 +73,12 @@ final class Session {
     var marks: Set<CGWindowID> {
         get { locked { storedMarks } }
         set { locked { storedMarks = newValue } }
+    }
+
+    /// KnightSight's windows that clicks in the share could land on, which the panel keeps up to date.
+    var own: [CGRect] {
+        get { locked { storedOwn } }
+        set { locked { storedOwn = newValue } }
     }
 
     /// Whether the pinboard lies over the share.
@@ -100,25 +127,28 @@ final class MacDesk: Desk {
     private let session: Session
     private let say: Say
     private let foreground: Foreground
+    private let cursor: AssistantCursor
 
-    init(session: Session, say: Say, foreground: Foreground, board: Board) {
+    init(session: Session, say: Say, foreground: Foreground, board: Board, cursor: AssistantCursor) {
         self.board = board
         self.session = session
         self.say = say
         self.foreground = foreground
+        self.cursor = cursor
     }
 
     func currentShare() -> Share? {
         guard session.active, let chosen = session.chosen else { return nil }
-        guard let id = chosen.window else {
-            return Share(area: chosen.region, pixelsPerPoint: density(chosen.region), reachable: true)
+        let serial = session.serial, own = session.own
+        guard chosen.window != nil else {
+            return Share(area: chosen.region, pixelsPerPoint: density(chosen.region), reachable: true, serial: serial, own: own)
         }
-        guard let shared = Windows.info(id) else { return nil }
-        return Share(area: shared.bounds, pixelsPerPoint: density(shared.bounds), reachable: shared.onScreen)
+        guard let shared = chosen.current else { return nil }
+        return Share(area: shared.bounds, pixelsPerPoint: density(shared.bounds), reachable: shared.onScreen, serial: serial, own: own)
     }
 
     func bringBack() -> Bool {
-        guard session.active, let id = session.chosen?.window, let shared = Windows.info(id) else { return false }
+        guard session.active, let shared = session.chosen?.current else { return false }
         return Foreground.unminimize(shared)
     }
 
@@ -134,6 +164,16 @@ final class MacDesk: Desk {
         return Screenshot(png: Bitmap.png(shot.image), title: shot.title, note: note)
     }
 
+    func controls(in area: CGRect) -> [Node]? {
+        guard AXIsProcessTrusted(), let chosen = session.chosen else { return nil }
+        if chosen.window != nil { return chosen.current.flatMap { ControlTree.read($0, in: area) } }
+        // A region shows parts of several windows, and the one under its middle stands for it.
+        guard let under = Windows.front(at: CGPoint(x: area.midX, y: area.midY), skipping: session.marks),
+              under.pid != Windows.ownPid
+        else { return nil }
+        return ControlTree.read(under, in: area)
+    }
+
     /// The share laid into a picture of the given size, its title, and whether a shared
     /// window lies fully covered.
     func picture(size: CGSize) throws -> (image: CGImage, title: String, covered: Bool) {
@@ -141,10 +181,10 @@ final class MacDesk: Desk {
             throw Refused("KnightSight is not allowed to record the screen yet. The person at the Mac can turn it on in System Settings under Privacy & Security, Screen Recording.")
         }
         let chosen = try current()
-        guard let id = chosen.window else {
+        guard chosen.window != nil else {
             return try (Capture.region(chosen.region, skipping: session.marks, size: size), chosen.title, false)
         }
-        let shared = try window(id)
+        let shared = try window(chosen)
         return try (Capture.window(shared, size: size), shared.title(say), Windows.fullyCovered(shared, skipping: session.marks))
     }
 
@@ -157,7 +197,10 @@ final class MacDesk: Desk {
         if let area = currentShare()?.area {
             session.clicked(CGPoint(x: (point.x - area.minX) / area.width, y: (point.y - area.minY) / area.height))
         }
-        let note = try foreground.run(target, at: point, mayOpenMenu: true) { Input.click(at: point, right: right, twice: double) }
+        let note = try foreground.run(target, at: point, mayOpenMenu: true) {
+            cursor.point(at: point, over: target.id, rings: double ? 2 : 1)
+            Input.click(at: point, right: right, twice: double)
+        }
         return "Clicked, briefly in the foreground." + note
     }
 
@@ -165,15 +208,23 @@ final class MacDesk: Desk {
         try needInput()
         try needUncovered()
         let target = try self.target(at: point, in: current())
-        let note = try foreground.run(target, at: point) { Input.scroll(at: point, notches: notches) }
+        let note = try foreground.run(target, at: point) {
+            cursor.point(at: point, over: target.id)
+            Input.scroll(at: point, notches: notches)
+        }
         return "Scrolled, briefly in the foreground." + note
     }
 
     func type(_ text: String) throws -> String {
         try needInput()
         let target = try keyTarget()
+        aimKeys(over: target)
         session.busy()
         Input.type(text, to: target.pid)
+        // A dialog that a typed Return confirms closes halfway through, with part of the text in it.
+        guard Windows.info(target.id) != nil else {
+            throw Refused("The window closed while the text was being typed.", delivered: true)
+        }
         return "Typed."
     }
 
@@ -182,12 +233,22 @@ final class MacDesk: Desk {
         try needInput()
         let target = try keyTarget()
         guard combo.modifiers.contains(.command) else {
+            aimKeys(over: target)
             session.busy()
             Input.press(combo, to: .process(target.pid))
             return "Pressed."
         }
-        let note = try foreground.run(target, at: nil) { Input.press(combo, to: .system) }
+        let note = try foreground.run(target, at: nil) {
+            aimKeys(over: target)
+            Input.press(combo, to: .system)
+        }
         return "Pressed, briefly in the foreground." + note
+    }
+
+    // The arrow shows typing at the last click, or in the middle of the share before any click.
+    private func aimKeys(over target: WindowInfo) {
+        guard let area = currentShare()?.area else { return }
+        cursor.point(at: cursor.lastClick(in: area) ?? CGPoint(x: area.midX, y: area.midY), over: target.id)
     }
 
     private func density(_ area: CGRect) -> CGFloat {
@@ -213,27 +274,28 @@ final class MacDesk: Desk {
         return chosen
     }
 
-    private func window(_ id: CGWindowID) throws -> WindowInfo {
-        guard let shared = Windows.info(id) else { throw Refused.nothingShared }
+    private func window(_ chosen: Chosen) throws -> WindowInfo {
+        guard let shared = chosen.current else { throw Refused.nothingShared }
         return shared
     }
 
     /// The window a click at this point lands on. In a region that is whatever shows there.
     private func target(at point: CGPoint, in chosen: Chosen) throws -> WindowInfo {
         if let id = chosen.window {
-            let shared = try window(id)
+            let shared = try window(chosen)
             return Windows.visible().first { $0.bounds.contains(point) && ($0.id == id || Windows.isPopup($0, of: shared)) } ?? shared
         }
-        guard let found = Windows.front(at: point, skipping: session.marks), found.pid != Windows.ownPid else {
+        guard let found = Windows.front(at: point, skipping: session.marks) else {
             throw Refused("No window that takes input lies at this point.")
         }
+        guard found.pid != Windows.ownPid else { throw Refused("That point lies on KnightSight itself.") }
         return found
     }
 
     // In a region keys go to the window last clicked there, wherever it has moved since.
     private func keyTarget() throws -> WindowInfo {
         let chosen = try current()
-        if let id = chosen.window { return try window(id) }
+        if chosen.window != nil { return try window(chosen) }
         guard let focus = session.focus.flatMap({ Windows.info($0.id) }) else {
             throw Refused("Keys go to the window last clicked inside the region, and nothing has been clicked there yet.")
         }

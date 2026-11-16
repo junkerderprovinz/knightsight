@@ -4,9 +4,12 @@ import Foundation
 /// A request the panel turns down, with the reason the assistant reads.
 public struct Refused: Error, Equatable {
     public let message: String
+    /// Set when the refusal came after input went out, so some of it may have arrived.
+    public let delivered: Bool
 
-    public init(_ message: String) {
+    public init(_ message: String, delivered: Bool = false) {
         self.message = message
+        self.delivered = delivered
     }
 
     public static let nothingShared = Refused("Nothing is shared right now. Choose a window or a region in the KnightSight window and start sharing.")
@@ -19,11 +22,18 @@ public struct Share {
     public var pixelsPerPoint: CGFloat
     /// False while a shared window is minimized, hidden or on another desktop.
     public var reachable: Bool
+    /// Counts up with every new share and every newly chosen target, so refs from a look at
+    /// an earlier one are not taken for this one.
+    public var serial: Int
+    /// KnightSight's own windows that a click in the share could land on, in screen points.
+    public var own: [CGRect]
 
-    public init(area: CGRect, pixelsPerPoint: CGFloat, reachable: Bool) {
+    public init(area: CGRect, pixelsPerPoint: CGFloat, reachable: Bool, serial: Int = 0, own: [CGRect] = []) {
         self.area = area
         self.pixelsPerPoint = pixelsPerPoint
         self.reachable = reachable
+        self.serial = serial
+        self.own = own
     }
 
     public static let maxEdge: CGFloat = 1568
@@ -68,6 +78,8 @@ public protocol Desk: AnyObject {
     func bringBack() -> Bool
     func began(_ doing: String)
     func look(size: CGSize) throws -> Screenshot
+    /// The controls in the area as accessibility reports them, or nil when they cannot be read.
+    func controls(in area: CGRect) -> [Node]?
     func click(at point: CGPoint, right: Bool, double: Bool) throws -> String
     func scroll(at point: CGPoint, notches: Int) throws -> String
     func type(_ text: String) throws -> String
@@ -82,6 +94,7 @@ public final class Responder {
     private let desk: Desk
     private let say: Say
     private let gate = NSLock()
+    private var lastLook: (serial: Int, elements: [Element])?
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .withoutEscapingSlashes
@@ -103,6 +116,7 @@ public final class Responder {
             reply.ok = true
         } catch let refused as Refused {
             reply = Reply(ok: false, error: refused.message)
+            if refused.delivered { reply.delivered = "maybe" }
         } catch {
             reply = Reply(ok: false, error: "\(type(of: error)): \(error.localizedDescription)")
         }
@@ -129,11 +143,13 @@ public final class Responder {
             reply.height = Int(size.height)
             reply.title = picture.title
             reply.note = picture.note
+            reply.elements = desk.controls(in: share.area).map { Elements.list($0, in: share) }
+            lastLook = (share.serial, reply.elements ?? [])
         case "click":
-            let at = try share.screenPoint(x: request.number("x"), y: request.number("y"))
+            let at = try point(request, in: share, for: "Click")
             reply.message = try desk.click(at: at, right: request.flag("right"), double: request.flag("double"))
         case "scroll":
-            let at = try share.screenPoint(x: request.number("x"), y: request.number("y"))
+            let at = try point(request, in: share, for: "Scroll")
             let amount = try request.number("amount")
             // A wild amount would scroll for minutes, and one past Int would trap.
             let notches = Int(min(max(amount, -100), 100).rounded(.toNearestOrEven))
@@ -146,6 +162,28 @@ public final class Responder {
             throw Refused("Unknown command: \(cmd)")
         }
         return reply
+    }
+
+    /// Where a click or scroll goes: a point in the picture, or the middle of an element from
+    /// the last look at this share. The assistant may look at KnightSight but not work it.
+    private func point(_ request: Request, in share: Share, for action: String) throws -> CGPoint {
+        let p = try aim(request, in: share, for: action)
+        guard !share.own.contains(where: { $0.contains(p) }) else { throw Refused("That point lies on KnightSight itself.") }
+        return p
+    }
+
+    private func aim(_ request: Request, in share: Share, for action: String) throws -> CGPoint {
+        if request.fields["ref"] != nil {
+            let ref = try request.text("ref")
+            guard let last = lastLook, last.serial == share.serial, let element = last.elements.first(where: { $0.ref == ref }) else {
+                throw Refused("There is no element \(ref) from the last look. Take a new look.")
+            }
+            return try share.screenPoint(x: element.centre.x, y: element.centre.y)
+        }
+        guard request.fields["x"] != nil || request.fields["y"] != nil else {
+            throw Refused("\(action) needs x and y or a ref from look.")
+        }
+        return try share.screenPoint(x: request.number("x"), y: request.number("y"))
     }
 
     private func notes(unread: Bool) -> Reply {
@@ -166,12 +204,14 @@ public final class Responder {
 struct Reply: Encodable {
     var ok = false
     var error: String?
+    var delivered: String?
     var message: String?
     var image: String?
     var title: String?
     var width: Int?
     var height: Int?
     var note: String?
+    var elements: [Element]?
     var round: Int?
     var sent: String?
     var notes: [NoteReply]?

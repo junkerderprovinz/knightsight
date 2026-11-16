@@ -15,6 +15,7 @@ const ACTIONS = ['click', 'scroll', 'type', 'key'];
 const point = {
   x: { type: 'number', description: 'Horizontal position in the picture from look' },
   y: { type: 'number', description: 'Vertical position in the picture from look' },
+  ref: { type: 'string', description: 'An element from the last look, such as e12, instead of x and y' },
 };
 const after = {
   look: { type: 'boolean', description: 'Also return a picture of the share taken after the action' },
@@ -24,16 +25,18 @@ const after = {
 const tools = [
   {
     name: 'look',
-    description: 'Takes a picture of the shared window or region. A shared window may lie covered. Coordinates for click and scroll refer to this picture.',
+    description:
+      'Takes a picture of the shared window or region and lists the controls the system reports inside it, each with a ref ' +
+      'such as e12, its role, name and place. A shared window may lie covered. Coordinates and refs for click and scroll ' +
+      'refer to this picture and stay valid until the next look.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'click',
-    description: 'Clicks a point inside the share. Where the system cannot click in the background, the shared window comes forward for a moment and the person gets their pointer and front window back afterwards.',
+    description: 'Clicks a point or an element from the last look inside the share. Where the system cannot click in the background, the shared window comes forward for a moment and the person gets their pointer and front window back afterwards.',
     inputSchema: {
       type: 'object',
       properties: { ...point, right: { type: 'boolean' }, double: { type: 'boolean' }, ...after },
-      required: ['x', 'y'],
     },
   },
   {
@@ -42,7 +45,7 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: { ...point, amount: { type: 'number' }, ...after },
-      required: ['x', 'y', 'amount'],
+      required: ['amount'],
     },
   },
   {
@@ -84,6 +87,20 @@ const tools = [
         ...after,
       },
       required: ['steps'],
+    },
+  },
+  {
+    name: 'wait',
+    description:
+      'Waits until a control whose name holds the text shows up in the share, then returns a look. It reads the controls ' +
+      'the system reports, not the pixels, so text drawn into a picture or a canvas is not found.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+        seconds: { type: 'number', description: 'How long to wait, default 10, up to 120' },
+      },
+      required: ['text'],
     },
   },
   {
@@ -227,10 +244,22 @@ async function relay(msg) {
 
 const text = (lines, isError = false) => ({ content: [{ type: 'text', text: lines.join('\n') }], ...(isError ? { isError } : {}) });
 
+// A refusal says whether input may have reached the window, so a failed click is not
+// simply sent again. A panel that does not say so refused before it touched anything.
+function refusal(reply) {
+  const after = reply.delivered === 'maybe'
+    ? 'The input may have arrived. Look before trying again.'
+    : 'Nothing reached the window, so it is safe to try again.';
+  return `${reply.error} ${after}`;
+}
+
+const element = (e) => `${e.ref} ${e.role}${e.name ? ` "${e.name}"` : ''} at ${e.x}, ${e.y}, ${e.width} x ${e.height}`;
+
 function picture(reply, note) {
+  const elements = reply.elements?.length ? ['Controls:', ...reply.elements.map(element)] : [];
   return {
     content: [
-      { type: 'text', text: [note, `${reply.title}, ${reply.width} x ${reply.height}`, reply.note].filter(Boolean).join('\n') },
+      { type: 'text', text: [note, `${reply.title}, ${reply.width} x ${reply.height}`, reply.note, ...elements].filter(Boolean).join('\n') },
       { type: 'image', data: reply.image, mimeType: 'image/png' },
     ],
   };
@@ -239,7 +268,7 @@ function picture(reply, note) {
 async function lookAfter(wait, lines) {
   await sleep(Math.min(Math.max(wait ?? 300, 0), 10000));
   const shot = await relay({ cmd: 'look' });
-  return shot.ok ? picture(shot, lines.join(' ')) : text([...lines, shot.error], true);
+  return shot.ok ? picture(shot, lines.join(' ')) : text([...lines, refusal(shot)], true);
 }
 
 async function steps(args) {
@@ -248,7 +277,7 @@ async function steps(args) {
     const { action, wait, ...fields } = step;
     if (!ACTIONS.includes(action)) return text([...done, `Step ${i + 1}: unknown action ${action}.`], true);
     const reply = await relay({ ...fields, cmd: action });
-    if (!reply.ok) return text([...done, `Step ${i + 1} (${action}): ${reply.error}`], true);
+    if (!reply.ok) return text([...done, `Step ${i + 1} (${action}): ${refusal(reply)}`], true);
     done.push(reply.message);
     if (wait) await sleep(Math.min(wait, 10000));
   }
@@ -305,12 +334,31 @@ async function notes(args, progress) {
   }
 }
 
+async function waitFor(args, progress) {
+  const wanted = String(args.text ?? '').toLowerCase();
+  if (!wanted) return text(['wait needs a text to look for.'], true);
+  const seconds = Math.min(Math.max(Number(args.seconds) || 10, 1), 120);
+  const started = Date.now();
+  for (;;) {
+    const shot = await relay({ cmd: 'look' });
+    if (!shot.ok) return text([refusal(shot)], true);
+    const found = shot.elements?.find((e) => e.name?.toLowerCase().includes(wanted));
+    if (found) return picture(shot, `Found ${element(found)}.`);
+    if (Date.now() - started >= seconds * 1000) {
+      return text([`No control named like "${args.text}" showed up within ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`], true);
+    }
+    progress?.(Math.round((Date.now() - started) / 100) / 10, seconds);
+    await sleep(500);
+  }
+}
+
 async function callTool(name, args, progress) {
   if (name === 'steps') return steps(args);
   if (name === 'pinboard') return notes(args, progress);
+  if (name === 'wait') return waitFor(args, progress);
   const { look, wait, ...fields } = args;
   const reply = await relay({ ...fields, cmd: name });
-  if (!reply.ok) return text([reply.error], true);
+  if (!reply.ok) return text([refusal(reply)], true);
   if (name === 'look') return picture(reply);
   return look ? lookAfter(wait, [reply.message]) : text([reply.message]);
 }

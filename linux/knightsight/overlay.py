@@ -15,6 +15,7 @@ from gi.repository import GdkX11  # noqa: E402
 
 from . import marks, notes, xlib  # noqa: E402
 from .pinboard import GAP, SIDE, Window  # noqa: E402
+from .protocol import Rect  # noqa: E402
 
 # Black at 8 percent, as alpha of the premultiplied pixels the window keeps.
 VEIL = 20
@@ -79,6 +80,9 @@ class Veil:
         xlib.XMapRaised(self.x.d, self.w)
         self.mapped = True
         return True
+
+    def box(self):
+        return Rect(*self.spot) if self.mapped else None
 
     def stack(self, sibling, mode):
         changes = xlib.XWindowChanges(sibling=sibling, stack_mode=mode)
@@ -164,6 +168,8 @@ class Overlay(Window):
         self.placed = None
         self.above = False
         self.restacked = 0.0
+        # Where this window lies on the screen, for the request thread, which must not ask GTK.
+        self.box = None
         # How many shots keep this window off the screen.
         self.out = 0
 
@@ -232,6 +238,7 @@ class Overlay(Window):
             else:
                 self.veil.stack(side, xlib.Below)
             self.place(area, side)
+            self.box = self.wins.bounds(side)
         self.paint()
         self.wins.x.failed()
 

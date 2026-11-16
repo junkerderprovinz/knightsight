@@ -40,6 +40,15 @@ def draw(ctx, glyph, s):
         _corner(ctx, [(hi - a, lo), (hi, lo), (hi, lo + a)])
         _corner(ctx, [(hi, hi - a), (hi, hi), (hi - a, hi)])
         _corner(ctx, [(lo + a, hi), (lo, hi), (lo, hi - a)])
+    elif glyph == "screen":
+        x, y, w, h = s * 0.06, s * 0.1, s * 0.88, s * 0.6
+        rounded(ctx, x, y, w, h, 2.5)
+        ctx.stroke()
+        ctx.move_to(s / 2, y + h)
+        ctx.line_to(s / 2, s * 0.88)
+        ctx.move_to(s * 0.3, s * 0.88)
+        ctx.line_to(s * 0.7, s * 0.88)
+        ctx.stroke()
     elif glyph == "start":
         ctx.move_to(s * 0.22, s * 0.14)
         ctx.line_to(s * 0.86, s * 0.5)

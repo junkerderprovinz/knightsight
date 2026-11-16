@@ -2,11 +2,12 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["LANGUAGE"] = "en"
 
-from knightsight import notes, protocol  # noqa: E402
+from knightsight import notes, protocol, say  # noqa: E402
 from knightsight.protocol import Rect, Refused  # noqa: E402
 
 
@@ -15,6 +16,9 @@ class Desk:
         self.done = []
         self.is_minimized = False
         self.comes_back = False
+        self.controls = None
+        self.fails = None
+        self.ours = []
 
     def minimized(self, share):
         return self.is_minimized
@@ -24,10 +28,18 @@ class Desk:
         return self.comes_back
 
     def look(self, share):
-        return {"image": "", "width": share.width, "height": share.height, "title": "Test"}
+        reply = {"image": "", "width": share.width, "height": share.height, "title": "Test"}
+        if self.controls is not None:
+            reply["elements"] = self.controls
+        return reply
 
     def click(self, share, args):
-        self.done.append(("click", protocol.to_area(share, args)))
+        point = protocol.to_area(share, args)
+        protocol.clear_of(*point, self.ours)
+        if self.fails:
+            with protocol.delivering():
+                raise self.fails
+        self.done.append(("click", point))
         return "Clicked."
 
     def scroll(self, share, args):
@@ -49,6 +61,7 @@ class Panel:
         self.shared = area if shared else None
         self.doing = None
         self.rounds = notes.Rounds()
+        self.elements = None
 
     def share(self):
         return self.shared
@@ -114,6 +127,91 @@ class Replies(unittest.TestCase):
         self.assertEqual(panel.doing, "Right-clicking")
         ask(panel, cmd="key", keys="ctrl+pageup")
         self.assertEqual(panel.doing, "Pressing Ctrl+Page Up")
+
+
+ADD = {"ref": "e2", "role": "button", "name": "Add", "x": 430, "y": 40, "width": 60, "height": 30}
+
+
+class Refs(unittest.TestCase):
+    def test_a_ref_from_the_last_look_is_clicked_in_its_middle(self):
+        panel = Panel()
+        panel.desk.controls = [ADD]
+        self.assertEqual(ask(panel, cmd="look")["elements"], [ADD])
+        self.assertEqual(ask(panel, cmd="click", ref="e2"), {"ok": True, "message": "Clicked."})
+        self.assertEqual(ask(panel, cmd="scroll", ref="e2", amount=1), {"ok": True, "message": "Scrolled."})
+        self.assertEqual(panel.desk.done[0], ("click", (560, 105)))
+        self.assertEqual(panel.desk.done[1][1], (560, 105))
+
+    def test_a_ref_before_any_look_is_refused(self):
+        panel = Panel()
+        self.assertEqual(ask(panel, cmd="click", ref="e2")["error"],
+                         "There is no element e2 from the last look. Take a new look.")
+        self.assertEqual(panel.desk.done, [])
+
+    def test_a_ref_the_last_look_did_not_list_is_refused(self):
+        panel = Panel()
+        panel.desk.controls = [ADD]
+        ask(panel, cmd="look")
+        self.assertEqual(ask(panel, cmd="click", ref="e12")["error"],
+                         "There is no element e12 from the last look. Take a new look.")
+
+    def test_a_look_without_controls_forgets_the_refs_before_it(self):
+        panel = Panel()
+        panel.desk.controls = [ADD]
+        ask(panel, cmd="look")
+        panel.desk.controls = None
+        self.assertNotIn("elements", ask(panel, cmd="look"))
+        self.assertFalse(ask(panel, cmd="click", ref="e2")["ok"])
+
+    def test_neither_a_point_nor_a_ref_is_refused(self):
+        panel = Panel()
+        self.assertEqual(ask(panel, cmd="click")["error"], "Click needs x and y or a ref from look.")
+        self.assertEqual(ask(panel, cmd="scroll", amount=2)["error"], "Scroll needs x and y or a ref from look.")
+
+
+class Delivery(unittest.TestCase):
+    def test_a_refusal_before_any_input_says_nothing_about_delivery(self):
+        reply = ask(Panel(), cmd="click", x=5000, y=1)
+        self.assertEqual(reply, {"ok": False, "error": "The point lies outside the share."})
+
+    def test_a_failure_while_input_goes_out_may_have_delivered(self):
+        panel = Panel()
+        panel.desk.fails = OSError("the input layer broke")
+        self.assertEqual(ask(panel, cmd="click", x=1, y=1),
+                         {"ok": False, "error": "OSError: the input layer broke", "delivered": "maybe"})
+        panel.desk.fails = Refused("The window closed while the input went to it.")
+        self.assertEqual(ask(panel, cmd="click", x=1, y=1)["delivered"], "maybe")
+
+
+PANEL = Rect(300, 400, 720, 304)
+
+
+class OwnWindows(unittest.TestCase):
+    def test_a_point_on_the_panel_is_refused(self):
+        with self.assertRaises(Refused) as caught:
+            protocol.clear_of(310, 410, [None, PANEL])
+        self.assertEqual(str(caught.exception), "That point lies on KnightSight itself.")
+
+    def test_a_point_beside_the_panel_or_on_a_hidden_window_passes(self):
+        protocol.clear_of(299, 410, [PANEL])
+        protocol.clear_of(310, 704, [PANEL])
+        protocol.clear_of(310, 410, [None])
+
+    def test_a_click_on_the_panel_says_nothing_reached_the_window(self):
+        panel = Panel(area=Rect(0, 0, 1280, 800))
+        panel.desk.ours = [PANEL]
+        self.assertEqual(ask(panel, cmd="click", x=310, y=410), {"ok": False, "error": protocol.ON_US})
+        self.assertEqual(panel.desk.done, [])
+
+
+class Screens(unittest.TestCase):
+    def test_a_screen_is_titled_by_its_number_and_size(self):
+        self.assertEqual(say.screen(1, 2560, 1440), "Screen 1 (2560 x 1440)")
+        self.assertEqual(say.screen(None, 1280, 800), "Screen (1280 x 800)")
+
+    def test_a_german_desktop_titles_it_in_german(self):
+        with mock.patch.object(say, "GERMAN", True):
+            self.assertEqual(say.screen(2, 1920, 1080), "Bildschirm 2 (1920 x 1080)")
 
 
 class Notes(unittest.TestCase):

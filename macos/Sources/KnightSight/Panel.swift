@@ -17,12 +17,14 @@ final class Panel: NSObject, NSWindowDelegate {
     private let view: PanelView
     private let frame = Frame()
     private let badge = Badge()
+    private let cursor = AssistantCursor()
     private let pinboard: Pinboard
     private let foreground: Foreground
     private let desk: MacDesk
     private var hotkey: Hotkey?
     private var server: LineServer?
     private var picker: RegionPicker?
+    private var screens: ScreenPicker?
     private var picking = false, buttonWasDown = false, working = false
     private var missing = (screen: false, input: false)
     private var pulse: CGFloat = 0
@@ -38,7 +40,7 @@ final class Panel: NSObject, NSWindowDelegate {
         view = PanelView(say: say)
         pinboard = Pinboard(board: board, say: say)
         foreground = Foreground(session: session, say: say)
-        desk = MacDesk(session: session, say: say, foreground: foreground, board: board)
+        desk = MacDesk(session: session, say: say, foreground: foreground, board: board, cursor: cursor)
         window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: PanelView.width, height: PanelView.height),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -46,7 +48,7 @@ final class Panel: NSObject, NSWindowDelegate {
         window.title = "KnightSight"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        // An empty toolbar makes the title bar as tall as the panel's bar, with the window buttons in its middle.
+        // An empty toolbar makes the title bar about as tall as the panel's bar, with the window buttons in its middle.
         window.toolbar = NSToolbar()
         window.toolbarStyle = .unifiedCompact
         window.isReleasedWhenClosed = false
@@ -57,6 +59,7 @@ final class Panel: NSObject, NSWindowDelegate {
 
         view.pickWindow.onPress = { [weak self] in self?.startPick() }
         view.pickRegion.onPress = { [weak self] in self?.pickRegion() }
+        view.pickScreen.onPress = { [weak self] in self?.pickScreen() }
         view.toggle.onPress = { [weak self] in
             guard let self else { return }
             if session.active { stop() } else { start() }
@@ -65,7 +68,7 @@ final class Panel: NSObject, NSWindowDelegate {
         pinboard.onClose = { [weak self] in self?.togglePinboard() }
         pinboard.onDone = { [weak self] in self?.sendNotes() }
         pinboard.onSaveFile = { [weak self] in self?.saveNotes() }
-        session.marks = Set((frame.edges + [badge.window] + pinboard.windows).map { CGWindowID($0.windowNumber) })
+        session.marks = Set((frame.edges + [badge.window, cursor.window] + pinboard.windows).map { CGWindowID($0.windowNumber) })
 
         hotkey = Hotkey(stop: { [weak self] in self?.stop() }, pinboard: { [weak self] in self?.togglePinboard() })
         let responder = Responder(desk: desk, say: say)
@@ -93,7 +96,7 @@ final class Panel: NSObject, NSWindowDelegate {
 
     private func headline() -> String {
         guard let chosen = session.chosen else { return say.nothingChosen }
-        return chosen.window.flatMap { Windows.info($0)?.title(say) } ?? chosen.title
+        return chosen.current?.title(say) ?? chosen.title
     }
 
     private func subline() -> String {
@@ -104,7 +107,7 @@ final class Panel: NSObject, NSWindowDelegate {
         if session.active && working { return say.doing + session.doing }
         if session.active, let notice { return notice }
         if session.active { return say.shared }
-        return chosen.window != nil ? say.windowChosen : say.regionChosen
+        return chosen.window != nil ? say.windowChosen : chosen.screen ? say.screenChosen : say.regionChosen
     }
 
     private func showState() {
@@ -115,6 +118,7 @@ final class Panel: NSObject, NSWindowDelegate {
         view.working = working
         view.pickWindow.isEnabled = !active
         view.pickRegion.isEnabled = !active
+        view.pickScreen.isEnabled = !active
         view.toggle.isEnabled = session.chosen != nil
         view.toggle.title = active ? say.stopShare : say.startShare
         view.toggle.glyph = active ? .stop : .start
@@ -135,9 +139,9 @@ final class Panel: NSObject, NSWindowDelegate {
         let down = NSEvent.pressedMouseButtons & 1 != 0
         if buttonWasDown && !down,
            let w = Windows.front(at: Screens.flip(NSEvent.mouseLocation), skipping: session.marks),
-           w.pid != Windows.ownPid, w.layer == 0 {
+           w.pid != Windows.ownPid, w.layer == 0, let started = Processes.started(w.pid) {
             picking = false
-            choose(Chosen(window: w.id, region: .zero, title: w.title(say)))
+            choose(Chosen(window: w.id, owner: Owner(pid: w.pid, started: started), region: .zero, title: w.title(say)))
             showState()
         }
         buttonWasDown = down
@@ -152,11 +156,31 @@ final class Panel: NSObject, NSWindowDelegate {
                 choose(Chosen(window: nil, region: area, title: "\(say.region) \(Int(area.width)) x \(Int(area.height))"))
             }
             picker = nil
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            showState()
+            backFromPicking()
         }
         picker?.show()
+    }
+
+    // A whole screen is shared as a region with that screen's bounds.
+    private func pickScreen() {
+        picking = false
+        window.orderOut(nil)
+        screens = ScreenPicker(hint: say.clickScreen) { [weak self] picked in
+            guard let self else { return }
+            if let picked {
+                let size = picked.bounds.size
+                choose(Chosen(window: nil, region: picked.bounds, title: say.screen(picked.number, width: Int(size.width), height: Int(size.height)), screen: true))
+            }
+            screens = nil
+            backFromPicking()
+        }
+        screens?.show()
+    }
+
+    private func backFromPicking() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        showState()
     }
 
     // Notes belong to what they were written on.
@@ -259,6 +283,8 @@ final class Panel: NSObject, NSWindowDelegate {
         }
 
         let active = session.active
+        cursor.follow(sharing: active, marks: session.marks)
+        session.own = ownSpots()
         let nowWorking = active && now.timeIntervalSince(session.lastRequest) < Panel.workSpan
         let phase = now.timeIntervalSince1970.truncatingRemainder(dividingBy: Panel.pulsePeriod) / Panel.pulsePeriod
         pulse = Motion.on ? CGFloat(0.5 - 0.5 * cos(2 * .pi * phase)) : 1
@@ -281,8 +307,8 @@ final class Panel: NSObject, NSWindowDelegate {
         guard let chosen = session.chosen else { return hideMarks() }
         var shared: WindowInfo?
         var area = chosen.region
-        if let id = chosen.window {
-            guard let w = Windows.info(id) else {
+        if chosen.window != nil {
+            guard let w = chosen.current else {
                 session.chosen = nil
                 session.active = false
                 closePinboard()
@@ -348,23 +374,32 @@ final class Panel: NSObject, NSWindowDelegate {
     // Frame, badge and pinboard sit right above a shared window: high enough to show, and no
     // higher, so a window the person lays over the share stays clear of them. A region gets
     // them on top. The pinboard's veil is ordered first and so ends up above the frame, and its
-    // cards move along with it as its child windows.
+    // cards move along with it as its child windows. The assistant's arrow may lie between.
     private func stack(on shared: WindowInfo?) {
         let marks = pinboard.shown + frame.edges + (badge.window.isVisible ? [badge.window] : [])
         let level = shared.map { NSWindow.Level(rawValue: $0.layer) } ?? .floating
         for mark in marks where mark.level != level { mark.level = level }
         guard let shared else { return }
-        let ids = Set(marks.map { CGWindowID($0.windowNumber) })
+        let ids = Set(marks.map { CGWindowID($0.windowNumber) }), arrow = CGWindowID(cursor.window.windowNumber)
         var seen = 0
         for w in Windows.above(shared.id).reversed() {
             if ids.contains(w.id) {
                 seen += 1
-            } else if !Windows.isPopup(w, of: shared) {
+            } else if w.id != arrow && !Windows.isPopup(w, of: shared) {
                 break
             }
         }
         if seen == ids.count { return }
         for mark in marks where mark.parent == nil { mark.order(.above, relativeTo: Int(shared.id)) }
+    }
+
+    // The parts of KnightSight a click in the share must not reach. A shared window comes to the
+    // front before a click, so there the panel is never in the way. On the pinboard's veil a
+    // click is refused with a reason of its own.
+    private func ownSpots() -> [CGRect] {
+        var own = pinboard.cards + (badge.window.isVisible ? [badge.window] : [])
+        if session.chosen?.window == nil && window.isVisible && window.isOnActiveSpace { own.append(window) }
+        return own.map { Screens.flip($0.frame) }
     }
 
     // Above the top right corner of the frame, or inside it when the share reaches the top of its screen.
@@ -377,9 +412,9 @@ final class Panel: NSObject, NSWindowDelegate {
 }
 
 final class PanelView: NSView {
-    static let width: CGFloat = 600, height: CGFloat = 244, bar: CGFloat = 40, gutter: CGFloat = 16, finderWidth: CGFloat = 176
+    static let width: CGFloat = 720, height: CGFloat = 304, bar: CGFloat = 44, gutter: CGFloat = 20, padding: CGFloat = 24, finderWidth: CGFloat = 252
 
-    let pickWindow: SoftButton, pickRegion: SoftButton, toggle: SoftButton, pin: SoftButton, info: SoftButton
+    let pickWindow: SoftButton, pickRegion: SoftButton, pickScreen: SoftButton, toggle: SoftButton, pin: SoftButton, info: SoftButton
     private(set) var headline = "", subline = ""
     private var oldHeadline = "", oldSubline = ""
     private var swap = 1.0
@@ -401,35 +436,44 @@ final class PanelView: NSView {
     }
     private var pictures: (colour: NSImage, grey: NSImage)?
     // The finder's corners stand wide and breathe until the share starts, then snap in close.
-    private var lit = 0.0, corners = 14.0, cornerSpeed = 0.0
+    private var lit = 0.0, corners = 18.0, cornerSpeed = 0.0
 
     var card: CGRect {
         CGRect(x: PanelView.gutter, y: PanelView.bar, width: PanelView.width - 2 * PanelView.gutter, height: PanelView.height - PanelView.bar - PanelView.gutter)
     }
 
     var finder: CGRect {
-        let card = self.card
-        return CGRect(x: card.minX + 16, y: card.minY + 16, width: PanelView.finderWidth, height: card.height - 32)
+        let card = self.card, pad = PanelView.padding
+        return CGRect(x: card.minX + pad, y: card.minY + pad, width: PanelView.finderWidth, height: card.height - 2 * pad)
     }
 
-    var viewfinder: CGRect { finder.insetBy(dx: 14, dy: 14) }
+    var viewfinder: CGRect { finder.insetBy(dx: 18, dy: 18) }
+
+    var side: (x: CGFloat, width: CGFloat) {
+        let x = finder.maxX + 28
+        return (x, card.maxX - PanelView.padding - x)
+    }
 
     init(say: Say) {
         pickWindow = SoftButton(say.pickWindow, glyph: .window)
         pickRegion = SoftButton(say.pickRegion, glyph: .region)
+        pickScreen = SoftButton(say.pickScreen, glyph: .screen)
         toggle = SoftButton(say.startShare, glyph: .start, kind: .primary)
         pin = SoftButton(say.pinboard, glyph: .pin)
         info = SoftButton("", glyph: .info)
         noTarget = say.noTarget
         super.init(frame: CGRect(x: 0, y: 0, width: PanelView.width, height: PanelView.height))
-        let card = self.card
-        let side = finder.maxX + 18, sideWidth = card.maxX - 16 - side
-        let small = (sideWidth - 16) / 3, rowY = card.maxY - 16 - 48 - 8 - 36
-        pickWindow.frame = CGRect(x: side, y: rowY, width: small, height: 36)
-        pickRegion.frame = CGRect(x: side + small + 8, y: rowY, width: small, height: 36)
-        pin.frame = CGRect(x: side + 2 * (small + 8), y: rowY, width: small, height: 36)
-        toggle.frame = CGRect(x: side, y: card.maxY - 16 - 48, width: sideWidth, height: 48)
-        toggle.radius = 10
+        let card = self.card, (side, sideWidth) = self.side
+        let lowY = card.maxY - PanelView.padding - 52, rowY = lowY - 12 - 40
+        let small = (sideWidth - 20) / 3
+        for (i, pick) in [pickWindow, pickRegion, pickScreen].enumerated() {
+            pick.frame = CGRect(x: side + CGFloat(i) * (small + 10), y: rowY, width: small, height: 40)
+            pick.radius = 10
+        }
+        pin.frame = CGRect(x: side, y: lowY, width: 132, height: 52)
+        pin.radius = 10
+        toggle.frame = CGRect(x: side + 142, y: lowY, width: sideWidth - 142, height: 52)
+        toggle.radius = 12
         toggle.label = Theme.semiBold(15)
         info.frame = CGRect(x: card.maxX - 28, y: (PanelView.bar - 28) / 2, width: 28, height: 28)
         info.radius = 14
@@ -437,9 +481,10 @@ final class PanelView: NSView {
         info.setAccessibilityLabel(say.help)
         pickWindow.toolTip = say.pickWindowTip
         pickRegion.toolTip = say.pickRegionTip
+        pickScreen.toolTip = say.pickScreenTip
         pin.toolTip = say.pinboardTip
         pin.setAccessibilityLabel(say.pinboardTip)
-        for button in [pickWindow, pickRegion, toggle, pin, info] { addSubview(button) }
+        for button in [pickWindow, pickRegion, pickScreen, toggle, pin, info] { addSubview(button) }
     }
 
     required init?(coder: NSCoder) {
@@ -472,7 +517,7 @@ final class PanelView: NSView {
         }
         let moving = Motion.on, litTo: Double = shared ? 1 : 0
         let breathe = moving ? 0.5 - 0.5 * cos(2 * .pi * Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 2.4) / 2.4) : 0
-        let cornersTo = shared ? 6 : 14 + 6 * breathe
+        let cornersTo = shared ? 8 : 18 + 6 * breathe
         if moving || lit != litTo { setNeedsDisplay(finder) }
         lit = Motion.step(lit, to: litTo, elapsed: elapsed, duration: Motion.content)
         if moving {
@@ -490,14 +535,14 @@ final class PanelView: NSView {
         bounds.fill()
         let card = self.card
         Theme.surface.setFill()
-        NSBezierPath(roundedRect: card, xRadius: 10, yRadius: 10).fill()
+        NSBezierPath(roundedRect: card, xRadius: 16, yRadius: 16).fill()
 
         let finder = self.finder
         drawFinder(finder)
-        let side = finder.maxX + 18, sideWidth = card.maxX - 16 - side
-        logoImage().draw(in: CGRect(x: side, y: card.minY + 16, width: 28, height: 28), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        let head = CGRect(x: side + 38, y: card.minY + 19, width: sideWidth - 38, height: 24)
-        let sub = CGRect(x: side + 16, y: card.minY + 52, width: sideWidth - 16, height: 20)
+        let (side, sideWidth) = self.side, top = card.minY + PanelView.padding
+        logoImage().draw(in: CGRect(x: side, y: top, width: 32, height: 32), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        let head = CGRect(x: side + 44, y: top + 4, width: sideWidth - 44, height: 24)
+        let sub = CGRect(x: side + 18, y: top + 42, width: sideWidth - 18, height: 20)
 
         // The state dot: grey until shared, accent while shared, pulsing while work goes on.
         let d: CGFloat = 8, mx = side, my = sub.minY + 10
@@ -517,10 +562,10 @@ final class PanelView: NSView {
     // shared. A line sweeps over it while the assistant works, and a dot marks its last click.
     private func drawFinder(_ finder: CGRect) {
         (Theme.dark ? Theme.rgb(18, 17, 16) : Theme.surface2).setFill()
-        NSBezierPath(roundedRect: finder, xRadius: 10, yRadius: 10).fill()
+        NSBezierPath(roundedRect: finder, xRadius: 12, yRadius: 12).fill()
         let view = viewfinder, t = CGFloat(Motion.ease(lit))
         if !chosen {
-            let attributes: [NSAttributedString.Key: Any] = [.font: Theme.regular(13), .foregroundColor: Theme.muted]
+            let attributes: [NSAttributedString.Key: Any] = [.font: Theme.regular(14), .foregroundColor: Theme.muted]
             let size = noTarget.size(withAttributes: attributes)
             noTarget.draw(at: CGPoint(x: finder.midX - size.width / 2, y: finder.midY - size.height / 2), withAttributes: attributes)
         } else if let pictures {
@@ -542,7 +587,7 @@ final class PanelView: NSView {
             NSGraphicsContext.restoreGraphicsState()
         }
 
-        let box = finder.insetBy(dx: corners, dy: corners), arm: CGFloat = 16
+        let box = finder.insetBy(dx: corners, dy: corners), arm: CGFloat = 20
         let brackets = NSBezierPath()
         let ends: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [(box.minX, box.minY, 1, 1), (box.maxX, box.minY, -1, 1), (box.minX, box.maxY, 1, -1), (box.maxX, box.maxY, -1, -1)]
         for (x, y, sx, sy) in ends {
@@ -593,17 +638,17 @@ final class PanelView: NSView {
         headText.draw(
             with: head.offsetBy(dx: 0, dy: dy),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-            attributes: [.font: Theme.semiBold(16), .foregroundColor: Theme.text.withAlphaComponent(alpha), .paragraphStyle: style])
+            attributes: [.font: Theme.semiBold(18), .foregroundColor: Theme.text.withAlphaComponent(alpha), .paragraphStyle: style])
         subText.draw(
             with: sub.offsetBy(dx: 0, dy: dy),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-            attributes: [.font: Theme.regular(13), .foregroundColor: Theme.secondary.withAlphaComponent(alpha), .paragraphStyle: style])
+            attributes: [.font: Theme.regular(14), .foregroundColor: Theme.secondary.withAlphaComponent(alpha), .paragraphStyle: style])
     }
 
     private func logoImage() -> NSImage {
-        let pixels = Int((28 * (window?.backingScaleFactor ?? 2)).rounded())
+        let pixels = Int((32 * (window?.backingScaleFactor ?? 2)).rounded())
         if let logo, logo.pixels == pixels { return logo.image }
-        let image = NSImage(cgImage: Logo.render(pixels), size: CGSize(width: 28, height: 28))
+        let image = NSImage(cgImage: Logo.render(pixels), size: CGSize(width: 32, height: 32))
         logo = (pixels, image)
         return image
     }

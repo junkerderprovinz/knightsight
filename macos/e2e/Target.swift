@@ -1,9 +1,9 @@
 import AppKit
 
-// A window with a coloured band over a text view. Every click and key it gets goes into the
-// log under its title, clicks in points from the top left of the content, so the driver can
-// tell where input landed. Arguments: title, colour as rrggbb, top left corner in screen
-// points, log.
+// A window with a coloured band over a text view and a Go button in the band. Every click and
+// key it gets goes into the log under its title, clicks in points from the top left of the
+// content, so the driver can tell where input landed. Arguments: title, colour as rrggbb, top
+// left corner in screen points, log.
 let args = CommandLine.arguments
 let title = args[1]
 let rgb = Int(args[2], radix: 16)!
@@ -51,6 +51,21 @@ NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotificati
 }
 window.contentView!.addSubview(band)
 window.contentView!.addSubview(scroll)
+
+final class Presser: NSObject {
+    @objc func press(_ sender: NSButton) {
+        note("pressed \(sender.title)")
+    }
+}
+
+// At 310, 10 to 390, 40 from the top left of the content. It never takes the keyboard, so
+// typing keeps going to the text view.
+let presser = Presser()
+let go = NSButton(title: "Go", target: presser, action: #selector(Presser.press(_:)))
+go.frame = CGRect(x: 310, y: 260, width: 80, height: 30)
+go.refusesFirstResponder = true
+window.contentView!.addSubview(go)
+
 window.setFrameTopLeftPoint(CGPoint(x: corner.x, y: NSScreen.screens[0].frame.height - corner.y))
 window.makeFirstResponder(text)
 window.makeKeyAndOrderFront(nil)

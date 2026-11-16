@@ -26,6 +26,7 @@ final class FakeDesk: Desk {
 
     var share: Share? = Share(area: CGRect(x: 100, y: 200, width: 784, height: 600), pixelsPerPoint: 2, reachable: true)
     var refusal: Refused?
+    var nodes: [Node]?
     var calls: [Call] = []
     var labels: [String] = []
     let layout: KeyLayout = TestLayout()
@@ -47,6 +48,8 @@ final class FakeDesk: Desk {
         return Screenshot(png: Data([1, 2, 3]), title: "Notes\nDraft", note: nil)
     }
 
+    func controls(in area: CGRect) -> [Node]? { nodes }
+
     func click(at point: CGPoint, right: Bool, double: Bool) throws -> String {
         if let refusal { throw refusal }
         calls.append(.click(point, right: right, double: double))
@@ -59,6 +62,7 @@ final class FakeDesk: Desk {
     }
 
     func type(_ text: String) throws -> String {
+        if let refusal { throw refusal }
         calls.append(.type(text))
         return "Typed."
     }
@@ -222,9 +226,101 @@ final class ResponderTests: XCTestCase {
         XCTAssertEqual(desk.calls, [])
     }
 
+    func testRefusesAPointOnKnightSightsOwnWindows() throws {
+        desk.share?.own = [CGRect(x: 300, y: 300, width: 720, height: 304)]
+        desk.nodes = [Node(role: "AXButton", title: "Start sharing", frame: CGRect(x: 400, y: 400, width: 100, height: 40))]
+        _ = try ask(["cmd": "look"])
+        for request: [String: Any] in [
+            ["cmd": "click", "x": 400, "y": 200],
+            ["cmd": "click", "ref": "e1"],
+            ["cmd": "scroll", "x": 1500, "y": 400, "amount": 1],
+        ] {
+            let r = try ask(request)
+            XCTAssertEqual(r["error"] as? String, "That point lies on KnightSight itself.")
+            XCTAssertNil(r["delivered"])
+        }
+        _ = try ask(["cmd": "click", "x": 398, "y": 198])
+        XCTAssertEqual(desk.calls.dropFirst(), [.click(CGPoint(x: 299, y: 299), right: false, double: false)])
+    }
+
     func testARefusalFromTheDeskIsPassedOn() throws {
         desk.refusal = Refused("No window that takes input lies at this point.")
         try assertRefused(["cmd": "click", "x": 2, "y": 2], "No window that takes input lies at this point.")
+    }
+
+    let quest = [
+        Node(role: "AXTextField", label: "New quest", text: "Slay the dragon", frame: CGRect(x: 110, y: 220, width: 180, height: 30)),
+        Node(role: "AXButton", title: "Add", frame: CGRect(x: 300, y: 220, width: 60, height: 30)),
+        Node(role: "AXGroup", frame: CGRect(x: 100, y: 200, width: 784, height: 600)),
+    ]
+
+    func testLookListsTheControlsWithTheirRefs() throws {
+        desk.nodes = quest
+        let r = try ask(["cmd": "look"])
+        let elements = try XCTUnwrap(r["elements"] as? [[String: Any]])
+        XCTAssertEqual(elements.map { $0["ref"] as? String }, ["e1", "e2"])
+        XCTAssertEqual(elements.map { $0["role"] as? String }, ["edit", "button"])
+        XCTAssertEqual(elements.map { $0["name"] as? String }, ["New quest", "Add"])
+        XCTAssertEqual([elements[1]["x"], elements[1]["y"], elements[1]["width"], elements[1]["height"]].map { $0 as? Int }, [400, 40, 120, 60])
+        XCTAssertFalse(responder.answer("{\"cmd\": \"look\"}").contains("Slay the dragon"), "what is typed in a field stays in it")
+    }
+
+    func testANamelessControlComesWithoutAName() throws {
+        desk.nodes = [Node(role: "AXButton", frame: CGRect(x: 110, y: 220, width: 20, height: 20))]
+        let elements = try XCTUnwrap(try ask(["cmd": "look"])["elements"] as? [[String: Any]])
+        XCTAssertEqual(elements.count, 1)
+        XCTAssertNil(elements[0]["name"])
+    }
+
+    func testALookWhoseControlsCannotBeReadStillHasItsPicture() throws {
+        let r = try ask(["cmd": "look"])
+        XCTAssertEqual(r["ok"] as? Bool, true)
+        XCTAssertEqual(r["image"] as? String, "AQID")
+        XCTAssertNil(r["elements"])
+    }
+
+    func testClickAndScrollByRefAimAtTheMiddleOfTheElement() throws {
+        desk.nodes = quest
+        _ = try ask(["cmd": "look"])
+        XCTAssertEqual(try ask(["cmd": "click", "ref": "e2"])["message"] as? String, "Clicked.")
+        _ = try ask(["cmd": "scroll", "ref": "e1", "amount": 2])
+        XCTAssertEqual(desk.calls.dropFirst(), [.click(CGPoint(x: 330, y: 235), right: false, double: false), .scroll(CGPoint(x: 200, y: 235), 2)])
+    }
+
+    func testARefMustComeFromTheLastLookAtThisShare() throws {
+        try assertRefused(["cmd": "click", "ref": "e1"], "There is no element e1 from the last look. Take a new look.")
+        desk.nodes = quest
+        _ = try ask(["cmd": "look"])
+        try assertRefused(["cmd": "click", "ref": "e12"], "There is no element e12 from the last look. Take a new look.")
+        desk.share?.serial = 1
+        try assertRefused(["cmd": "click", "ref": "e1"], "There is no element e1 from the last look. Take a new look.")
+        XCTAssertEqual(desk.calls, [.look(CGSize(width: 1568, height: 1200))])
+    }
+
+    func testALookWithoutControlsForgetsTheRefsBeforeIt() throws {
+        desk.nodes = quest
+        _ = try ask(["cmd": "look"])
+        desk.nodes = nil
+        _ = try ask(["cmd": "look"])
+        try assertRefused(["cmd": "scroll", "ref": "e1", "amount": 1], "There is no element e1 from the last look. Take a new look.")
+    }
+
+    func testClickAndScrollNeedAPointOrARef() throws {
+        try assertRefused(["cmd": "click"], "Click needs x and y or a ref from look.")
+        try assertRefused(["cmd": "scroll", "amount": 1], "Scroll needs x and y or a ref from look.")
+    }
+
+    func testARefusalAfterInputWentOutSaysItMayHaveArrived() throws {
+        desk.refusal = Refused("The window closed while the text was being typed.", delivered: true)
+        let r = try ask(["cmd": "type", "text": "hi\n"])
+        XCTAssertEqual(r["ok"] as? Bool, false)
+        XCTAssertEqual(r["delivered"] as? String, "maybe")
+    }
+
+    func testARefusalBeforeAnyInputSaysNothingAboutDelivery() throws {
+        XCTAssertNil(try ask(["cmd": "click", "x": 5000, "y": 10])["delivered"])
+        desk.refusal = Refused("No window that takes input lies at this point.")
+        XCTAssertNil(try ask(["cmd": "click", "x": 2, "y": 2])["delivered"])
     }
 
     func testLabelsFollowTheLanguage() throws {

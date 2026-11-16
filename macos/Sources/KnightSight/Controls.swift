@@ -1,6 +1,6 @@
 import AppKit
 
-enum Glyph { case none, window, region, start, stop, info, pin, close }
+enum Glyph { case none, window, region, screen, start, stop, info, pin, close }
 
 /// A rounded button: neutral on the card, or the one filled accent button of the view.
 /// Hover fades in and a press sinks it a little, both as transitions over Motion.control.
@@ -161,6 +161,12 @@ enum Glyphs {
             stroke(line([(r - a, t), (r, t), (r, t + a)]))
             stroke(line([(r, bt - a), (r, bt), (r - a, bt)]))
             stroke(line([(l + a, bt), (l, bt), (l, bt - a)]))
+        case .screen:
+            let display = CGRect(x: b.minX + s * 0.06, y: b.minY + s * 0.12, width: s * 0.88, height: s * 0.58)
+            let foot = b.maxY - s * 0.1
+            stroke(NSBezierPath(roundedRect: display, xRadius: 2.5 * k, yRadius: 2.5 * k))
+            stroke(line([(b.midX, display.maxY), (b.midX, foot)]))
+            stroke(line([(b.midX - s * 0.2, foot), (b.midX + s * 0.2, foot)]))
         case .start:
             let triangle = line([(b.minX + s * 0.22, b.minY + s * 0.14), (b.minX + s * 0.86, b.minY + s * 0.5), (b.minX + s * 0.22, b.minY + s * 0.86)])
             triangle.close()

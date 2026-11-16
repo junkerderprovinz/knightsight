@@ -1,10 +1,11 @@
 """Runs the panel on an X server with openbox, picks a window and a region through the panel
 itself, and drives the share through the real MCP server.
 
-Needs DISPLAY, a session bus, openbox, xdotool, Tk and node: tests/smoke-x11.sh sets them up.
+Needs DISPLAY, a session bus, openbox, xdotool, Tk, AT-SPI and node: tests/smoke-x11.sh sets them up.
 """
 
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -12,9 +13,14 @@ import tempfile
 import time
 import unittest
 
-from harness import HERE, LINUX, Mcp, image_of, listening, pixel, run, spawn, stop_all, text_of, wait_for
+from harness import HERE, LINUX, Mcp, image_of, listening, pixbuf, pixel, run, spawn, stop_all, text_of, wait_for
 
-from knightsight import protocol, theme, xlib
+import gi  # noqa: E402
+
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi, GLib  # noqa: E402
+
+from knightsight import picture, protocol, theme, xlib  # noqa: E402
 
 NOTHING = protocol.NOTHING_SHARED
 
@@ -63,6 +69,67 @@ def screen_pixel(x, y):
         d.close()
 
 
+def screenshot(name):
+    """Keeps the screen in the folder SMOKE_OUT names, for a look after a failed run."""
+    folder = os.environ.get("SMOKE_OUT")
+    if not folder:
+        return
+    d = xlib.Display()
+    try:
+        data, stride, _ = d.image(d.root, 0, 0, 1280, 800)
+    finally:
+        d.close()
+    picture.surface(data, stride, 1280, 800, False).write_to_png(os.path.join(folder, name))
+
+
+def top(d, w):
+    """The child of the root that holds w, the window manager's frame around it."""
+    while True:
+        parent = d.tree(w)[0]
+        if parent in (0, d.root):
+            return w
+        w = parent
+
+
+def cursor_stacking(target, other):
+    """Whether the assistant's arrow shows right above the target, with only KnightSight's
+    own marks between them, and below the other window."""
+    d = xlib.Display()
+    try:
+        order = d.tree(d.root)[1]
+        cursor = next((w for w in order if d.prop(w, "WM_NAME") == b"KnightSight cursor"), None)
+        if cursor is None or d.attributes(cursor).map_state != xlib.IsViewable:
+            return False
+        low, high = order.index(top(d, int(target))), order.index(cursor)
+        between = order[low + 1:high]
+        return low < high < order.index(top(d, int(other))) and all(d.attributes(w).override_redirect for w in between)
+    finally:
+        d.close()
+
+
+def dump_tree(name):
+    """Keeps every application's accessibility tree beside the screenshots."""
+    folder = os.environ.get("SMOKE_OUT")
+    if not folder:
+        return
+    Atspi.init()
+
+    def lines(a, depth):
+        try:
+            r = a.get_extents(Atspi.CoordType.WINDOW)
+            states = sorted(s.value_nick for s in a.get_state_set().get_states())
+            yield f"{'  ' * depth}{a.get_role().value_nick} {a.get_name()!r} {states} {(r.x, r.y, r.width, r.height)}"
+        except GLib.Error as e:
+            yield f"{'  ' * depth}{a.get_role_name()} ({e.message})"
+        for i in range(a.get_child_count()):
+            child = a.get_child_at_index(i)
+            if child is not None:
+                yield from lines(child, depth + 1)
+
+    with open(os.path.join(folder, name), "w") as f:
+        f.write("\n".join(lines(Atspi.get_desktop(0), 0)) + "\n")
+
+
 class SmokeX11(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -72,7 +139,7 @@ class SmokeX11(unittest.TestCase):
         spawn(sys.executable, os.path.join(HERE, "target.py"), cls.log.name, "Target", "#ff0000", "+600+100")
         window("Target")
         env = dict(os.environ, LANGUAGE="en", GDK_BACKEND="x11", GSK_RENDERER="cairo", NO_AT_BRIDGE="1",
-                   PYTHONPATH=LINUX, PYTHONFAULTHANDLER="1")
+                   GTK_A11Y="none", PYTHONPATH=LINUX, PYTHONFAULTHANDLER="1")
         cls.panel = spawn(sys.executable, "-m", "knightsight", env=env)
         try:
             wait_for(lambda: listening() or cls.panel.poll() is not None, "the port", 60)
@@ -113,22 +180,70 @@ class SmokeX11(unittest.TestCase):
             return all(abs(c - n) <= 6 for c, n in zip(screen_pixel(tx - 2, ty + 150), theme.NEUTRAL))
 
         for _ in range(3):
-            press(*self.panel_point(280, 138))
+            press(*self.panel_point(379, 176))
             press(tx + 200, ty + 150)
             try:
                 return wait_for(framed, "the grey frame", 5)
             except AssertionError:
                 pass
-        raise AssertionError(f"{title} could not be chosen")
+        screenshot(f"{title}-not-chosen.png")
+        geometry = run("xdotool", "getwindowgeometry", window(title))
+        raise AssertionError(f"{title} could not be chosen, beside it is {screen_pixel(tx - 2, ty + 150)}, {geometry}")
 
     def start_sharing(self):
         for _ in range(3):
-            press(*self.panel_point(397, 188))
+            press(*self.panel_point(571, 234))
             try:
                 return wait_for(lambda: NOTHING not in text_of(self.mcp.tool("look")), "the share to start", 5)
             except AssertionError:
                 pass
         raise AssertionError("sharing did not start")
+
+    def test_a_control_from_look_is_clicked_by_its_ref(self):
+        env = dict(os.environ, GDK_BACKEND="x11", GSK_RENDERER="cairo")
+        spawn(sys.executable, os.path.join(HERE, "controls.py"), self.log.name, "Controls", env=env)
+        # Openbox puts the panel below the Target, so the top left corner stays free.
+        run("xdotool", "windowmove", window("Controls"), "20", "20")
+        time.sleep(1)
+        self.choose_window("Controls")
+        self.start_sharing()
+
+        seen = [""]
+
+        def button():
+            seen[0] = text_of(self.mcp.tool("look"))
+            found = re.search(r'^(e\d+) button "Press me" at ', seen[0], re.M)
+            return found and found.group(1)
+
+        try:
+            ref = wait_for(button, "the button among the controls of a look", 15)
+        finally:
+            print("The look listed:", *re.findall(r"^e\d+ .*$", seen[0], re.M), sep="\n  ", flush=True)
+            dump_tree("accessible.txt")
+        self.assertIn("Clicked", text_of(self.mcp.tool("click", ref=ref)))
+        self.wait_event("Controls pressed")
+        self.assertIn("no element e999", text_of(self.mcp.tool("click", ref="e999")))
+
+        run("xdotool", "key", "ctrl+alt+shift+x")
+        wait_for(lambda: NOTHING in text_of(self.mcp.tool("look")), "the hotkey to end the share", 5)
+
+    def test_screen_share(self):
+        press(*self.panel_point(621, 176))
+        time.sleep(2)
+        screenshot("screen-picker.png")
+        press(640, 300)
+        self.start_sharing()
+        shot = self.mcp.tool("look")
+        self.assertIn("Screen 1 (1280 x 800), 1280 x 800", text_of(shot))
+        picture = pixbuf(image_of(shot))
+        self.assertEqual((picture.get_width(), picture.get_height()), (1280, 800))
+
+        run("xdotool", "windowactivate", "--sync", self.panel_id)
+        x, y = self.panel_point(100, 100)
+        self.assertIn("lies on KnightSight itself", text_of(self.mcp.tool("click", x=x, y=y)))
+
+        run("xdotool", "key", "ctrl+alt+shift+x")
+        wait_for(lambda: NOTHING in text_of(self.mcp.tool("look")), "the hotkey to end the share", 5)
 
     def test_window_share(self):
         self.assertIn(NOTHING, text_of(self.mcp.tool("look")))
@@ -159,6 +274,10 @@ class SmokeX11(unittest.TestCase):
         self.wait_event("Target button 1 50 60")
         self.assertEqual(run("xdotool", "getmouselocation", "--shell").splitlines()[:2], ["X=5", "Y=5"])
         self.assertEqual(run("xdotool", "getactivewindow", "getwindowname"), "Other")
+        try:
+            wait_for(lambda: cursor_stacking(window("Target"), other), "the arrow right above the Target", 3)
+        finally:
+            screenshot("cursor.png")
 
         self.mcp.tool("type", text="Hi")
         self.wait_event("Target key H")
@@ -185,7 +304,7 @@ class SmokeX11(unittest.TestCase):
         run("xdotool", "key", "ctrl+alt+shift+x")
         wait_for(lambda: NOTHING in text_of(self.mcp.tool("look")), "the hotkey to end the share", 5)
 
-        press(*self.panel_point(397, 138))
+        press(*self.panel_point(500, 176))
         time.sleep(2)
         drag(100, 100, 300, 250)
         self.start_sharing()

@@ -5,6 +5,7 @@ the refusals can be tested without a display.
 """
 
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from . import say
@@ -14,7 +15,24 @@ MAX_EDGE = 1568
 
 
 class Refused(Exception):
-    pass
+    """A request turned down. delivered says some of its input may have reached the window."""
+
+    def __init__(self, message, delivered=False):
+        super().__init__(message)
+        self.delivered = delivered
+
+
+@contextmanager
+def delivering():
+    """Wraps the part of an action that sends input, so whatever fails in it says the input
+    may have arrived."""
+    try:
+        yield
+    except Refused as e:
+        e.delivered = True
+        raise
+    except Exception as e:
+        raise Refused(f"{type(e).__name__}: {e}", delivered=True) from e
 
 
 @dataclass
@@ -74,6 +92,29 @@ def to_area(area, args):
     if not area.contains(x, y):
         raise Refused("The point lies outside the share.")
     return x, y
+
+
+ON_US = "That point lies on KnightSight itself."
+
+
+def clear_of(x, y, ours):
+    """Refuses a point on the screen that lies in one of the rectangles of KnightSight's own
+    windows. A rectangle may be None for a window that is not showing."""
+    if any(r is not None and r.contains(x, y) for r in ours):
+        raise Refused(ON_US)
+
+
+def aimed(cmd, args, elements):
+    """args with x and y at the middle of the element its ref names in the last look."""
+    ref = args.get("ref")
+    if ref is None:
+        if args.get("x") is None and args.get("y") is None:
+            raise Refused(f"{cmd.capitalize()} needs x and y or a ref from look.")
+        return args
+    found = next((e for e in elements or () if e["ref"] == ref), None)
+    if found is None:
+        raise Refused(f"There is no element {ref} from the last look. Take a new look.")
+    return dict(args, x=found["x"] + found["width"] / 2, y=found["y"] + found["height"] / 2)
 
 
 NAMED = {
@@ -183,10 +224,11 @@ def reply(line, panel):
         panel.working(describe(cmd, args))
         if cmd == "look":
             out.update(desk.look(share))
+            panel.elements = out.get("elements")
         elif cmd == "click":
-            out["message"] = desk.click(share, args)
+            out["message"] = desk.click(share, aimed(cmd, args, panel.elements))
         elif cmd == "scroll":
-            out["message"] = desk.scroll(share, args)
+            out["message"] = desk.scroll(share, aimed(cmd, args, panel.elements))
         elif cmd == "type":
             out["message"] = desk.type(share, text(args, "text"))
         elif cmd == "key":
@@ -196,6 +238,8 @@ def reply(line, panel):
         out["ok"] = True
     except Refused as e:
         out = {"ok": False, "error": str(e)}
+        if e.delivered:
+            out["delivered"] = "maybe"
     except Exception as e:
         out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     return json.dumps(out)

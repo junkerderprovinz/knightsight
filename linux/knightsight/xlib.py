@@ -208,6 +208,7 @@ if x11:
     XPending = _bind(x11, "XPending", c_int, D)
     XNextEvent = _bind(x11, "XNextEvent", c_int, D, POINTER(XEvent))
     XGetSelectionOwner = _bind(x11, "XGetSelectionOwner", W, D, XID)
+    XStoreName = _bind(x11, "XStoreName", c_int, D, W, c_char_p)
 
 if xtst:
     XTestFakeMotionEvent = _bind(xtst, "XTestFakeMotionEvent", c_int, D, c_int, c_int, c_int, c_ulong)

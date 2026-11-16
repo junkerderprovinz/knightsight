@@ -49,7 +49,7 @@ def window_share(frame, size=(1568, 882)):
 
 def desk():
     d = portal.Desk.__new__(portal.Desk)
-    d.panel = types.SimpleNamespace(busy=lambda: None, clicked=lambda *_: None, focused=False)
+    d.panel = types.SimpleNamespace(busy=lambda: None, clicked=lambda *_: None, focused=False, under_pointer=set())
     d.sent = []
     d._notify = lambda _share, method, _signature, *args: d.sent.append((method, args))
     return d
@@ -99,6 +99,14 @@ class PaddedWindow(unittest.TestCase):
         with self.assertRaisesRegex(Refused, "outside the share"):
             self.desk.click(self.share, {"x": 1010, "y": 620})
         self.assertEqual(self.desk.sent, [])
+
+    def test_a_click_where_the_pointer_comes_to_rest_on_knightsight_is_refused(self):
+        self.desk.panel.under_pointer.add("panel")
+        with self.assertRaises(Refused) as caught:
+            self.desk.click(self.share, {"x": 100, "y": 200})
+        self.assertEqual(str(caught.exception), "That point lies on KnightSight itself.")
+        self.assertFalse(caught.exception.delivered)
+        self.assertEqual([name for name, _ in self.desk.sent], ["NotifyPointerMotionAbsolute"])
 
     def test_points_move_with_the_crop_and_the_stream_units(self):
         share = window_share(stream.Frame(sample(1568, 882, (20, 10, 700, 500)), window=True), size=(784, 441))

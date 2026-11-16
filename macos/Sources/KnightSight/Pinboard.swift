@@ -65,6 +65,8 @@ final class Pinboard {
     /// The windows on the screen, the veil first.
     var shown: [NSWindow] { windows.filter(\.isVisible) }
 
+    var cards: [NSWindow] { [listCard, editorCard].filter(\.isVisible) }
+
     func open() {
         isOpen = true
         refresh()

@@ -16,6 +16,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
+using System.Windows.Automation;
 using System.Windows.Forms;
 
 namespace KnightSight
@@ -76,6 +77,10 @@ namespace KnightSight
         [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
         [DllImport("gdi32.dll")] public static extern IntPtr AddFontMemResourceEx(IntPtr font, uint length, IntPtr reserved, ref uint count);
         [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+        [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        [DllImport("kernel32.dll")] public static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
+        [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
 
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr param);
 
@@ -110,6 +115,9 @@ namespace KnightSight
         public static readonly string PickRegion = Pick("Region", "Bereich");
         public static readonly string PickWindowTip = Pick("Choose the window to share", "Fenster zum Freigeben wählen");
         public static readonly string PickRegionTip = Pick("Choose a region of the screen", "Bereich des Bildschirms wählen");
+        public static readonly string PickScreen = Pick("Screen", "Bildschirm");
+        public static readonly string PickScreenTip = Pick("Share a whole screen", "Einen ganzen Bildschirm freigeben");
+        public static readonly string ClickScreen = Pick("Click to share this screen", "Klick, um diesen Bildschirm freizugeben");
         public static readonly string NoTarget = Pick("No target", "Kein Ziel");
         public static readonly string StartShare = Pick("Start sharing", "Freigabe starten");
         public static readonly string StopShare = Pick("Stop sharing", "Freigabe beenden");
@@ -117,11 +125,12 @@ namespace KnightSight
         public static readonly string Minimise = Pick("Minimize", "Minimieren");
         public static readonly string NothingChosen = Pick("Nothing chosen yet", "Noch nichts gewählt");
         public static readonly string ClickTarget = Pick("Now click the window you want to share.", "Klick jetzt das Fenster an, das du freigeben willst.");
-        public static readonly string ChooseTarget = Pick("Choose a window or a region.", "Wähl ein Fenster oder einen Bereich.");
+        public static readonly string ChooseTarget = Pick("Choose what to share.", "Wähl, was du freigeben willst.");
         public static readonly string Doing = Pick("Now: ", "Gerade: ");
         public static readonly string Shared = Pick("Shared. Carry on as usual.", "Freigegeben. Du kannst normal weiterarbeiten.");
         public static readonly string WindowChosen = Pick("Window chosen, not shared yet.", "Fenster gewählt, noch nicht freigegeben.");
         public static readonly string RegionChosen = Pick("Region chosen, not shared yet.", "Bereich gewählt, noch nicht freigegeben.");
+        public static readonly string ScreenChosen = Pick("Screen chosen, not shared yet.", "Bildschirm gewählt, noch nicht freigegeben.");
         public static readonly string Region = Pick("Region", "Bereich");
         public static readonly string Looking = Pick("Taking a screenshot", "Mache Screenshot");
         public static readonly string RightClicking = Pick("Right-clicking", "Rechtsklick");
@@ -153,6 +162,7 @@ namespace KnightSight
         public static readonly string Language = Pick("en", "de");
 
         public static string Spots(int count) { return count + Pick(" spots", " Stellen"); }
+        public static string ScreenTitle(int number, Size size) { return Pick("Screen ", "Bildschirm ") + number + " (" + size.Width + " x " + size.Height + ")"; }
         public static string NoteTitle(int number) { return Pick("Note ", "Notiz ") + number; }
         public static string Round(int number) { return Pick("Round ", "Runde ") + number; }
         public static string From(string author) { return Pick("from ", "von ") + author; }
@@ -192,10 +202,177 @@ namespace KnightSight
     {
         public IntPtr Window;
         public Rectangle Region;
+        public bool Screen;
         public string Title;
         public volatile IntPtr Focus;
+        // Windows hands the handle of a closed window and the id of an ended process on to
+        // newcomers, so a shared window is known by its process and that process's start too.
+        public uint Pid;
+        public long Started;
+        // The controls of the last look, which a ref in click or scroll points into.
+        public volatile List<Element> Elements;
+        // The last click from the share's top left corner, where the assistant's pointer waits while it types.
+        public Point? Clicked;
 
         public Rectangle Area { get { return Window == IntPtr.Zero ? Region : Win.Bounds(Window); } }
+
+        public static Share Of(IntPtr window)
+        {
+            var s = new Share { Window = window, Title = Win.Title(window) };
+            Win.Owner(window, out s.Pid, out s.Started);
+            return s;
+        }
+
+        public bool Owns(uint pid, long started) { return pid == Pid && started == Started; }
+
+        public bool Gone
+        {
+            get
+            {
+                uint pid;
+                long started;
+                Win.Owner(Window, out pid, out started);
+                return !Native.IsWindow(Window) || !Owns(pid, started);
+            }
+        }
+    }
+
+    // A control from a look. Box is in screen pixels as the walk finds it and in the
+    // picture's pixels once Arrange has placed it.
+    class Element
+    {
+        public string Ref, Role, Name;
+        public Rectangle Box;
+
+        public Dictionary<string, object> Fields()
+        {
+            return new Dictionary<string, object>
+            {
+                { "ref", Ref }, { "role", Role }, { "name", Name },
+                { "x", Box.X }, { "y", Box.Y }, { "width", Box.Width }, { "height", Box.Height },
+            };
+        }
+    }
+
+    // Reads the controls of a window through UI Automation. The walk runs on a thread of its
+    // own, so a program that answers slowly holds up a look for the budget at most.
+    static class ControlTree
+    {
+        const int Most = 150, LongestName = 80;
+        static readonly TimeSpan Budget = TimeSpan.FromMilliseconds(1500);
+
+        static readonly Dictionary<ControlType, string> Roles = new Dictionary<ControlType, string>
+        {
+            { ControlType.Button, "button" }, { ControlType.SplitButton, "button" }, { ControlType.Hyperlink, "link" },
+            { ControlType.Edit, "edit" }, { ControlType.CheckBox, "checkbox" }, { ControlType.RadioButton, "radio" },
+            { ControlType.ComboBox, "combobox" }, { ControlType.MenuItem, "menuitem" }, { ControlType.TabItem, "tab" },
+            { ControlType.ListItem, "listitem" }, { ControlType.DataItem, "listitem" }, { ControlType.TreeItem, "treeitem" },
+            { ControlType.Slider, "slider" }, { ControlType.Text, "text" },
+        };
+
+        // A provider may report a control type of its own that UI Automation has no name for.
+        public static string Role(ControlType type)
+        {
+            string role;
+            return type != null && Roles.TryGetValue(type, out role) ? role : null;
+        }
+
+        // Null for what a look leaves out. Only the name is read, never the value, and a
+        // password field gives away nothing but its role.
+        public static Element Pick(ControlType type, string name, Rectangle box, bool offscreen, bool enabled, bool password)
+        {
+            var role = Role(type);
+            if (role == null || offscreen || box.Width <= 0 || box.Height <= 0) return null;
+            name = password ? "" : string.Join(" ", (name ?? "").Split((char[])null, StringSplitOptions.RemoveEmptyEntries));
+            if (name.Length > LongestName) name = name.Substring(0, LongestName);
+            if (name.Length == 0 && (!enabled || role == "text")) return null;
+            return new Element { Role = role, Name = name, Box = box };
+        }
+
+        // Clips to the share, scales into the picture and numbers the controls in reading order.
+        public static List<Element> Arrange(List<Element> found, Rectangle area, double scale)
+        {
+            var placed = new List<KeyValuePair<int, Element>>();
+            foreach (var e in found)
+            {
+                var r = Rectangle.Intersect(e.Box, area);
+                if (r.Width <= 0 || r.Height <= 0) continue;
+                var box = Rectangle.FromLTRB(
+                    (int)Math.Round((r.Left - area.X) * scale), (int)Math.Round((r.Top - area.Y) * scale),
+                    (int)Math.Round((r.Right - area.X) * scale), (int)Math.Round((r.Bottom - area.Y) * scale));
+                if (box.Width <= 0 || box.Height <= 0) continue;
+                placed.Add(new KeyValuePair<int, Element>(placed.Count, new Element { Role = e.Role, Name = e.Name, Box = box }));
+            }
+            // The index keeps controls on the same spot in the order the walk met them.
+            placed.Sort((a, b) =>
+            {
+                var p = a.Value.Box;
+                var q = b.Value.Box;
+                return p.Y != q.Y ? p.Y.CompareTo(q.Y) : p.X != q.X ? p.X.CompareTo(q.X) : a.Key.CompareTo(b.Key);
+            });
+            var listed = new List<Element>();
+            for (int i = 0; i < placed.Count && i < Most; i++)
+            {
+                placed[i].Value.Ref = "e" + (i + 1);
+                listed.Add(placed[i].Value);
+            }
+            return listed;
+        }
+
+        // Null when the walk broke, which leaves the look without controls but with its picture.
+        public static List<Element> Read(List<IntPtr> windows, Rectangle area, double scale)
+        {
+            var found = new List<Element>();
+            bool broke = false;
+            var clock = Stopwatch.StartNew();
+            // Whatever goes wrong inside another program's accessibility support costs the controls alone.
+            var walker = new Thread(() =>
+            {
+                try { Walk(windows, found, clock); }
+                catch (Exception) { lock (found) broke = true; }
+            }) { IsBackground = true };
+            walker.Start();
+            walker.Join(Budget + TimeSpan.FromMilliseconds(200));
+            lock (found) return broke ? null : Arrange(new List<Element>(found), area, scale);
+        }
+
+        // Breadth first, so a walk cut short by the budget has covered the whole window
+        // at the outer levels rather than one corner of it in depth.
+        static void Walk(List<IntPtr> windows, List<Element> found, Stopwatch clock)
+        {
+            var cache = new CacheRequest();
+            cache.Add(AutomationElement.NameProperty);
+            cache.Add(AutomationElement.ControlTypeProperty);
+            cache.Add(AutomationElement.BoundingRectangleProperty);
+            cache.Add(AutomationElement.IsOffscreenProperty);
+            cache.Add(AutomationElement.IsEnabledProperty);
+            cache.Add(AutomationElement.IsPasswordProperty);
+            var tree = TreeWalker.ControlViewWalker;
+            var pending = new Queue<AutomationElement>();
+            foreach (var h in windows)
+            {
+                try { pending.Enqueue(AutomationElement.FromHandle(h)); }
+                catch (ElementNotAvailableException) { }
+            }
+            while (pending.Count > 0 && clock.Elapsed < Budget)
+            {
+                AutomationElement child;
+                try { child = tree.GetFirstChild(pending.Dequeue(), cache); }
+                catch (ElementNotAvailableException) { continue; }
+                while (child != null && clock.Elapsed < Budget)
+                {
+                    var c = child.Cached;
+                    var r = c.BoundingRectangle;
+                    var e = r.IsEmpty ? null : Pick(c.ControlType, c.Name,
+                        Rectangle.FromLTRB((int)Math.Floor(r.Left), (int)Math.Floor(r.Top), (int)Math.Ceiling(r.Right), (int)Math.Ceiling(r.Bottom)),
+                        c.IsOffscreen, c.IsEnabled, c.IsPassword);
+                    if (e != null) lock (found) found.Add(e);
+                    pending.Enqueue(child);
+                    try { child = tree.GetNextSibling(child, cache); }
+                    catch (ElementNotAvailableException) { child = null; }
+                }
+            }
+        }
     }
 
     static class Win
@@ -239,6 +416,18 @@ namespace KnightSight
             uint pid;
             Native.GetWindowThreadProcessId(h, out pid);
             return pid == ownPid;
+        }
+
+        // Limited query rights, which a process running as administrator grants as well.
+        public static void Owner(IntPtr h, out uint pid, out long started)
+        {
+            Native.GetWindowThreadProcessId(h, out pid);
+            started = 0;
+            var process = Native.OpenProcess(0x1000, false, pid);
+            if (process == IntPtr.Zero) return;
+            long exited, kernel, user;
+            if (!Native.GetProcessTimes(process, out started, out exited, out kernel, out user)) started = 0;
+            Native.CloseHandle(process);
         }
 
         public static bool IsTopmost(IntPtr h) { return (Native.GetWindowLong(h, -20) & 0x8) != 0; }
@@ -419,9 +608,13 @@ namespace KnightSight
             return i;
         }
 
+        // Whether any input went out since the panel last cleared it, so a refusal that comes
+        // after can say some of it may have arrived.
+        public static bool Sent;
+
         static void Send(List<Native.INPUT> inputs)
         {
-            Native.SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(Native.INPUT)));
+            if (Native.SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(Native.INPUT))) > 0) Sent = true;
         }
 
         public static void Click(int x, int y, bool right, bool twice)
@@ -503,7 +696,7 @@ namespace KnightSight
 
         static void Post(IntPtr target, uint message, long wParam, long lParam)
         {
-            if (Native.PostMessage(target, message, new IntPtr(wParam), new IntPtr(lParam))) return;
+            if (Native.PostMessage(target, message, new IntPtr(wParam), new IntPtr(lParam))) { Sent = true; return; }
             if (Marshal.GetLastWin32Error() == 5) throw new Refused("The window runs as administrator and takes no input from here.");
             throw new Refused("The window takes no input right now.");
         }
@@ -742,31 +935,205 @@ namespace KnightSight
         }
     }
 
-    class RegionPicker : Form
+    // The assistant's arrow, which shows where it acts while the person's own pointer stays put.
+    // It sits right above the window it points into, so whatever covers that window covers the
+    // arrow too, and it stays out of every picture taken of the screen.
+    class Pointer : Form
     {
-        Point start;
-        Rectangle selection;
-        bool dragging;
-        public Rectangle Result { get; private set; }
+        const float Reach = 26, Linger = 4000, RingSpan = 400, RingGap = 150;
+        static readonly Color Ink = Color.FromArgb(22, 22, 22);
+        static readonly PointF[] Shape =
+        {
+            new PointF(0, 0), new PointF(0, 17.5f), new PointF(4.2f, 13.6f), new PointF(7.2f, 20),
+            new PointF(9.9f, 18.8f), new PointF(7, 12.6f), new PointF(12.4f, 12.6f),
+        };
+        readonly float k;
+        IntPtr target;
+        // From the share's top left corner, so the arrow moves along with a shared window.
+        PointF from, to;
+        DateTime appeared, moved, arrived;
+        int rings;
+        Point placed;
+        float placedAlpha;
 
-        public RegionPicker()
+        public Pointer(float k)
+        {
+            this.k = k;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        // Layered tool window, click-through, never activated.
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var p = base.CreateParams;
+                p.ExStyle |= 0x80000 | 0x80 | 0x20 | 0x08000000;
+                return p;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Native.SetWindowDisplayAffinity(Handle, 0x11);
+        }
+
+        // Starts the way to the spot and says how long the action should wait for the arrow.
+        public int Aim(IntPtr over, Point spot, int clicks)
+        {
+            var now = DateTime.UtcNow;
+            bool fresh = target == IntPtr.Zero || Remaining(now) <= 0;
+            if (fresh) appeared = now;
+            from = fresh ? spot : Where(now);
+            to = spot;
+            target = over;
+            moved = now;
+            arrived = now.AddMilliseconds(Motion.Content);
+            rings = Motion.Content > 0 ? clicks : 0;
+            return (int)Motion.Content;
+        }
+
+        public void Keep()
+        {
+            if (target != IntPtr.Zero && Remaining(DateTime.UtcNow) > 0) arrived = DateTime.UtcNow;
+        }
+
+        public void Vanish()
+        {
+            target = IntPtr.Zero;
+            if (!Visible) return;
+            // Blank first, so the next showing starts from nothing instead of this picture.
+            using (var blank = new Bitmap(1, 1, PixelFormat.Format32bppArgb)) Layered.Push(Handle, blank, placed, 0);
+            Hide();
+        }
+
+        PointF Where(DateTime now)
+        {
+            float t = Motion.Content > 0 ? Math.Min(1, (float)(now - moved).TotalMilliseconds / Motion.Content) : 1, e = Motion.Ease(t);
+            return new PointF(from.X + (to.X - from.X) * e, from.Y + (to.Y - from.Y) * e);
+        }
+
+        // Milliseconds until the arrow has faded out after the assistant's last action.
+        double Remaining(DateTime now) { return (arrived - now).TotalMilliseconds + Linger + Motion.Content; }
+
+        // Fades in where it first appears and out once the assistant has rested for a while.
+        float Alpha(DateTime now)
+        {
+            float span = Motion.Content;
+            double since = (now - appeared).TotalMilliseconds, left = Remaining(now);
+            if (span <= 0) return left > 0 ? 1 : 0;
+            return (float)Math.Max(0, Math.Min(1, Math.Min(since, left) / span));
+        }
+
+        bool Moving(DateTime now)
+        {
+            return (now - moved).TotalMilliseconds < Motion.Content || rings > 0 && (now - arrived).TotalMilliseconds < RingSpan + RingGap * (rings - 1);
+        }
+
+        public void Follow(Rectangle area, ICollection<IntPtr> marks)
+        {
+            if (target == IntPtr.Zero) return;
+            var now = DateTime.UtcNow;
+            if (Remaining(now) <= 0 || !Native.IsWindow(target)) { Vanish(); return; }
+            float alpha = Alpha(now);
+            var spot = Where(now);
+            var at = new Point(area.X + (int)Math.Round(spot.X), area.Y + (int)Math.Round(spot.Y));
+            if (!Visible) Show();
+            StackOver(marks);
+            if (at == placed && alpha == placedAlpha && !Moving(now)) return;
+            Draw(at, alpha, now);
+        }
+
+        // Right above the target, the menus it owns and the frame and badge of the share, and no higher.
+        void StackOver(ICollection<IntPtr> marks)
+        {
+            bool settled = false;
+            var w = Win.Above(target);
+            for (; w != IntPtr.Zero && (w == Handle || marks.Contains(w) || Win.IsOwnedBy(w, target)); w = Win.Above(w))
+                settled = w == Handle;
+            if (settled) return;
+            Native.SetWindowPos(Handle, w != IntPtr.Zero && !Win.IsTopmost(w) ? w : IntPtr.Zero, 0, 0, 0, 0, Win.KeepPlace);
+        }
+
+        void Draw(Point at, float alpha, DateTime now)
+        {
+            int size = (int)Math.Ceiling(2 * Reach * k);
+            float c = size / 2f;
+            using (var bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    Theme.Prepare(g);
+                    for (int i = 0; i < rings; i++)
+                    {
+                        float u = ((float)(now - arrived).TotalMilliseconds - i * RingGap) / RingSpan;
+                        if (u < 0 || u >= 1) continue;
+                        float r = (6 + 16 * Motion.Ease(u)) * k;
+                        using (var pen = new Pen(Color.FromArgb((int)(255 * (1 - u)), Theme.Accent), 2 * k))
+                            g.DrawEllipse(pen, c - r, c - r, 2 * r, 2 * r);
+                    }
+                    using (var arrow = new GraphicsPath())
+                    {
+                        arrow.AddPolygon(Array.ConvertAll(Shape, p => new PointF(c + p.X * k, c + p.Y * k)));
+                        using (var shadow = (GraphicsPath)arrow.Clone())
+                        using (var offset = new Matrix())
+                        {
+                            offset.Translate(k, 2 * k);
+                            shadow.Transform(offset);
+                            for (int i = 3; i >= 1; i--)
+                                using (var soft = new Pen(Color.FromArgb(16, 0, 0, 0), 2 * i * k) { LineJoin = LineJoin.Round })
+                                    g.DrawPath(soft, shadow);
+                        }
+                        using (var fill = new SolidBrush(Theme.Accent)) g.FillPath(fill, arrow);
+                        using (var edge = new Pen(Ink, 1.5f * k) { LineJoin = LineJoin.Round }) g.DrawPath(edge, arrow);
+                    }
+                }
+                placed = at;
+                placedAlpha = alpha;
+                Layered.Push(Handle, bmp, new Point(at.X - (int)c, at.Y - (int)c), (byte)(255 * alpha));
+            }
+        }
+    }
+
+    // A dimmed layer over every monitor that closes with what was picked, or with nothing on Escape.
+    class Picker : Form
+    {
+        public Rectangle Result { get; protected set; }
+
+        public Picker()
         {
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
             Bounds = SystemInformation.VirtualScreen;
-            BackColor = Color.Black;
-            TransparencyKey = Color.Magenta;
-            Opacity = 0.4;
-            Cursor = Cursors.Cross;
-            DoubleBuffered = true;
             KeyPreview = true;
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
             if (e.KeyCode == Keys.Escape) Close();
+        }
+    }
+
+    class RegionPicker : Picker
+    {
+        Point start;
+        Rectangle selection;
+        bool dragging;
+
+        public RegionPicker()
+        {
+            BackColor = Color.Black;
+            TransparencyKey = Color.Magenta;
+            Opacity = 0.4;
+            Cursor = Cursors.Cross;
+            DoubleBuffered = true;
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -797,6 +1164,105 @@ namespace KnightSight
             if (selection.Width == 0) return;
             e.Graphics.FillRectangle(Brushes.Magenta, selection);
             using (var pen = new Pen(Color.White, 2)) e.Graphics.DrawRectangle(pen, selection);
+        }
+    }
+
+    // Every monitor dimmed with a hint in its middle and the one under the pointer outlined. A
+    // layered window, so the hint stays solid while the screens behind it are dimmed.
+    class ScreenPicker : Picker
+    {
+        readonly float k;
+        readonly Rectangle all = SystemInformation.VirtualScreen;
+        readonly Rectangle[] screens = Array.ConvertAll(Screen.AllScreens, s => s.Bounds);
+        readonly Font font;
+        int hover = -1;
+        public int Number { get; private set; }
+
+        public ScreenPicker(float k)
+        {
+            this.k = k;
+            font = new Font(Theme.SemiBold, 15 * k, GraphicsUnit.Pixel);
+            Cursor = Cursors.Hand;
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var p = base.CreateParams;
+                p.ExStyle |= 0x80000;
+                return p;
+            }
+        }
+
+        public static int Under(Rectangle[] screens, Point p)
+        {
+            for (int i = 0; i < screens.Length; i++)
+                if (screens[i].Contains(p)) return i;
+            return -1;
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            hover = Under(screens, Cursor.Position);
+            Draw();
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int at = Under(screens, new Point(all.X + e.X, all.Y + e.Y));
+            if (at == hover) return;
+            hover = at;
+            Draw();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            int at = Under(screens, new Point(all.X + e.X, all.Y + e.Y));
+            if (e.Button == MouseButtons.Left && at >= 0)
+            {
+                Result = screens[at];
+                Number = at + 1;
+            }
+            Close();
+        }
+
+        void Draw()
+        {
+            using (var bmp = new Bitmap(all.Width, all.Height, PixelFormat.Format32bppArgb))
+            {
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    Theme.Prepare(g);
+                    g.Clear(Color.FromArgb(102, 0, 0, 0));
+                    g.TranslateTransform(-all.X, -all.Y);
+                    for (int i = 0; i < screens.Length; i++) Hint(g, screens[i], i == hover);
+                }
+                Layered.Push(Handle, bmp, all.Location, 255);
+            }
+        }
+
+        void Hint(Graphics g, Rectangle screen, bool lit)
+        {
+            float edge = 4 * k, icon = 18 * k, gap = 8 * k;
+            if (lit)
+                using (var pen = new Pen(Theme.Accent, edge))
+                    g.DrawRectangle(pen, screen.X + edge / 2, screen.Y + edge / 2, screen.Width - edge, screen.Height - edge);
+            var text = g.MeasureString(Say.ClickScreen, font);
+            float w = icon + gap + text.Width + 40 * k, h = 44 * k;
+            var pill = new RectangleF(screen.X + (screen.Width - w) / 2, screen.Y + (screen.Height - h) / 2, w, h);
+            using (var path = Theme.Rounded(pill, h / 2))
+            {
+                using (var brush = new SolidBrush(Theme.Surface)) g.FillPath(brush, path);
+                if (lit)
+                    using (var pen = new Pen(Theme.Accent, 2 * k)) g.DrawPath(pen, path);
+            }
+            float x = pill.X + 20 * k;
+            Glyphs.Draw(g, Glyph.Screen, new RectangleF(x, pill.Y + (h - icon) / 2, icon, icon), Theme.Text, k);
+            using (var ink = new SolidBrush(Theme.Text))
+            using (var format = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
+                g.DrawString(Say.ClickScreen, font, ink, new RectangleF(x + icon + gap, pill.Y, text.Width + 2, h), format);
         }
     }
 
@@ -1038,7 +1504,7 @@ namespace KnightSight
         }
     }
 
-    enum Glyph { None, Window, Region, Start, Stop, Info, Minimise, Close, Pin }
+    enum Glyph { None, Window, Region, Screen, Start, Stop, Info, Minimise, Close, Pin }
 
     // Line icons drawn in the button's ink, so they follow hover, theme and disabled state.
     static class Glyphs
@@ -1062,6 +1528,13 @@ namespace KnightSight
                         g.DrawLines(pen, new[] { new PointF(r - a, t), new PointF(r, t), new PointF(r, t + a) });
                         g.DrawLines(pen, new[] { new PointF(r, bt - a), new PointF(r, bt), new PointF(r - a, bt) });
                         g.DrawLines(pen, new[] { new PointF(l + a, bt), new PointF(l, bt), new PointF(l, bt - a) });
+                        break;
+                    case Glyph.Screen:
+                        var monitor = new RectangleF(b.X + s * 0.06f, b.Y + s * 0.1f, s * 0.88f, s * 0.6f);
+                        using (var path = Theme.Rounded(monitor, 2.5f * k)) g.DrawPath(pen, path);
+                        float mid = b.X + s / 2, foot = b.Y + s * 0.9f;
+                        g.DrawLine(pen, mid, monitor.Bottom, mid, foot);
+                        g.DrawLine(pen, mid - s * 0.2f, foot, mid + s * 0.2f, foot);
                         break;
                     case Glyph.Start:
                         using (var path = new GraphicsPath())
@@ -1197,13 +1670,16 @@ namespace KnightSight
             }
 
             float icon = Icon == Glyph.None ? 0 : 16 * K * scale, gap = Text.Length > 0 && icon > 0 ? 8 * K : 0;
-            float textWidth = Text.Length > 0 ? g.MeasureString(Text, Font).Width : 0;
-            float x = r.X + (r.Width - icon - gap - textWidth) / 2;
-            if (icon > 0) Glyphs.Draw(g, Icon, new RectangleF(x, r.Y + (r.Height - icon) / 2, icon, icon), ink, K * scale);
-            if (Text.Length == 0) return;
-            using (var brush = new SolidBrush(ink))
-            using (var format = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
-                g.DrawString(Text, Font, brush, new RectangleF(x + icon + gap, r.Y, textWidth + 2, r.Height), format);
+            // Typographic, so the padding GDI+ adds around text does not push it off centre.
+            using (var format = new StringFormat(StringFormat.GenericTypographic) { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
+            {
+                float textWidth = Text.Length > 0 ? g.MeasureString(Text, Font, PointF.Empty, format).Width : 0;
+                float x = r.X + (r.Width - icon - gap - textWidth) / 2;
+                if (icon > 0) Glyphs.Draw(g, Icon, new RectangleF(x, r.Y + (r.Height - icon) / 2, icon, icon), ink, K * scale);
+                if (Text.Length == 0) return;
+                using (var brush = new SolidBrush(ink))
+                    g.DrawString(Text, Font, brush, new RectangleF(x + icon + gap, r.Y, textWidth + 2, r.Height), format);
+            }
         }
     }
 
@@ -2062,6 +2538,8 @@ namespace KnightSight
         // Bottom first, as the panel stacks them above the share.
         public IEnumerable<Form> Windows { get { return new Form[] { overlay, list, editor }; } }
 
+        public IEnumerable<Form> Cards { get { return new Form[] { list, editor }; } }
+
         static string Author
         {
             get { return Microsoft.Win32.Registry.GetValue(Settings, "Author", "") as string ?? ""; }
@@ -2349,7 +2827,7 @@ namespace KnightSight
     public class Panel : Card
     {
         const int MaxEdge = 1568, Port = 47613;
-        const float PanelWidth = 600, PanelHeight = 244, BarHeight = 40, Gutter = 16, FinderWidth = 176;
+        const float PanelWidth = 720, PanelHeight = 304, BarHeight = 44, Gutter = 20, FinderWidth = 252;
         // A request less than this long ago counts as work in progress: frame and badge stay lit
         // through the pauses between the steps of one task.
         static readonly long WorkSpan = TimeSpan.FromSeconds(5).Ticks;
@@ -2358,9 +2836,11 @@ namespace KnightSight
 
         readonly Frame frame = new Frame();
         readonly Badge badge;
+        readonly Pointer pointer;
         readonly Hotkeys hotkeys;
         readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer { Interval = 15 };
         readonly SoftButton pickWindow = new SoftButton { Icon = Glyph.Window }, pickRegion = new SoftButton { Icon = Glyph.Region },
+            pickScreen = new SoftButton { Icon = Glyph.Screen },
             toggle = new SoftButton { Primary = true, Icon = Glyph.Start }, info = new SoftButton { Blank = true, Icon = Glyph.Info },
             minimise = new SoftButton { Blank = true, Icon = Glyph.Minimise }, close = new SoftButton { Blank = true, Icon = Glyph.Close },
             pin = new SoftButton { Icon = Glyph.Pin };
@@ -2386,9 +2866,9 @@ namespace KnightSight
         Bitmap preview;
         long previewDue, clickTicks;
         int previewBusy;
-        float corners = 14, cornerSpeed, lit, clickX, clickY;
+        float corners = 18, cornerSpeed, lit, clickX, clickY;
 
-        RectangleF Finder { get { var c = Card; return new RectangleF(c.X + S(16), c.Y + S(16), S(FinderWidth), c.Height - S(32)); } }
+        RectangleF Finder { get { var c = Card; return new RectangleF(c.X + S(24), c.Y + S(24), S(FinderWidth), c.Height - S(48)); } }
 
         RectangleF Card { get { return new RectangleF(S(Gutter), S(BarHeight), S(PanelWidth - 2 * Gutter), S(PanelHeight - BarHeight - Gutter)); } }
 
@@ -2408,8 +2888,8 @@ namespace KnightSight
         Panel()
         {
             using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
-            titleFont = new Font(Theme.SemiBold, S(16), GraphicsUnit.Pixel);
-            bodyFont = new Font(Theme.Regular, S(13), GraphicsUnit.Pixel);
+            titleFont = new Font(Theme.SemiBold, S(18), GraphicsUnit.Pixel);
+            bodyFont = new Font(Theme.Regular, S(14), GraphicsUnit.Pixel);
             tipFont = new Font(Theme.Regular, S(13), GraphicsUnit.Pixel);
             var buttonFont = new Font(Theme.SemiBold, S(14), GraphicsUnit.Pixel);
 
@@ -2422,22 +2902,25 @@ namespace KnightSight
             Size = new Size((int)S(PanelWidth), (int)S(PanelHeight));
             Grip = (int)S(BarHeight);
             badge = new Badge(k);
+            pointer = new Pointer(k);
 
             var card = Card;
-            float side = Finder.Right + S(18), sideWidth = card.Right - S(16) - side;
-            float small = (sideWidth - S(16)) / 3, rowY = card.Bottom - S(16) - S(48) - S(8) - S(36);
-            Place(pickWindow, Say.PickWindow, buttonFont, side, rowY, small, S(36));
-            Place(pickRegion, Say.PickRegion, buttonFont, side + small + S(8), rowY, small, S(36));
-            Place(pin, Say.Pinboard, buttonFont, side + 2 * (small + S(8)), rowY, small, S(36));
-            Place(toggle, Say.StartShare, new Font(Theme.SemiBold, S(15), GraphicsUnit.Pixel), side, card.Bottom - S(16) - S(48), sideWidth, S(48));
-            toggle.Radius = S(10);
+            float side = Finder.Right + S(28), sideWidth = card.Right - S(24) - side;
+            float small = (sideWidth - S(20)) / 3, shareY = card.Bottom - S(24) - S(52), rowY = shareY - S(12) - S(40);
+            Place(pickWindow, Say.PickWindow, buttonFont, side, rowY, small, S(40));
+            Place(pickRegion, Say.PickRegion, buttonFont, side + small + S(10), rowY, small, S(40));
+            Place(pickScreen, Say.PickScreen, buttonFont, side + 2 * (small + S(10)), rowY, small, S(40));
+            Place(pin, Say.Pinboard, buttonFont, side, shareY, S(132), S(52));
+            Place(toggle, Say.StartShare, new Font(Theme.SemiBold, S(15), GraphicsUnit.Pixel), side + S(142), shareY, sideWidth - S(142), S(52));
+            toggle.Radius = S(12);
             tip.SetToolTip(pickWindow, Say.PickWindowTip);
             tip.SetToolTip(pickRegion, Say.PickRegionTip);
+            tip.SetToolTip(pickScreen, Say.PickScreenTip);
             tip.SetToolTip(pin, Say.PinboardTip);
             info.Cursor = Cursors.Help;
-            PlaceOnBar(close, Say.Close, PanelWidth - 44);
-            PlaceOnBar(minimise, Say.Minimise, PanelWidth - 88);
-            PlaceOnBar(info, Say.Help, PanelWidth - 132);
+            PlaceOnBar(close, Say.Close, PanelWidth - 50);
+            PlaceOnBar(minimise, Say.Minimise, PanelWidth - 92);
+            PlaceOnBar(info, Say.Help, PanelWidth - 134);
             tip.Popup += (o, e) =>
             {
                 using (var g = CreateGraphics())
@@ -2457,11 +2940,12 @@ namespace KnightSight
 
             pickWindow.Click += (o, e) => StartPick();
             pickRegion.Click += (o, e) => PickRegion();
+            pickScreen.Click += (o, e) => PickScreen();
             toggle.Click += (o, e) => { if (active) Stop(); else Start(); };
             minimise.Click += (o, e) => WindowState = FormWindowState.Minimized;
             close.Click += (o, e) => Close();
             pin.Click += (o, e) => TogglePinboard();
-            Controls.AddRange(new Control[] { pickWindow, pickRegion, toggle, pin, info, minimise, close });
+            Controls.AddRange(new Control[] { pickWindow, pickRegion, pickScreen, pin, toggle, info, minimise, close });
             pinboard = new Pinboard(board, k) { Finish = FinishPinboard, SaveFile = SavePinboard, Closed = ClosePinboard };
 
             hotkeys = new Hotkeys(id => { if (id == 1) Stop(); else TogglePinboard(); });
@@ -2481,7 +2965,7 @@ namespace KnightSight
             b.Text = text;
             b.Font = font;
             b.Under = Theme.Surface;
-            b.Radius = S(6);
+            b.Radius = S(10);
             b.K = k;
             b.Bounds = Rectangle.Round(new RectangleF(x, y, w, h));
         }
@@ -2492,7 +2976,7 @@ namespace KnightSight
             b.Radius = S(6);
             b.K = k;
             b.Square = S(28);
-            b.Bounds = Rectangle.Round(new RectangleF(S(x), 0, S(44), S(BarHeight)));
+            b.Bounds = Rectangle.Round(new RectangleF(S(x), 0, S(42), S(BarHeight)));
             tip.SetToolTip(b, name);
         }
 
@@ -2512,16 +2996,16 @@ namespace KnightSight
             var g = e.Graphics;
             Theme.Prepare(g);
             var card = Card;
-            using (var path = Theme.Rounded(card, S(10)))
+            using (var path = Theme.Rounded(card, S(16)))
             using (var brush = new SolidBrush(Theme.Surface))
                 g.FillPath(brush, path);
 
             var finder = Finder;
             DrawFinder(g, finder);
-            float side = finder.Right + S(18), sideWidth = card.Right - S(16) - side;
-            Logo.Draw(g, side, card.Y + S(16), S(28));
-            var head = new RectangleF(side + S(38), card.Y + S(19), sideWidth - S(38), S(24));
-            var sub = new RectangleF(side + S(16), card.Y + S(52), sideWidth - S(16), S(20));
+            float side = finder.Right + S(28), sideWidth = card.Right - S(24) - side;
+            Logo.Draw(g, side, card.Y + S(24), S(32));
+            var head = new RectangleF(side + S(44), card.Y + S(28), sideWidth - S(44), S(26));
+            var sub = new RectangleF(side + S(18), card.Y + S(66), sideWidth - S(18), S(20));
             // The state dot: grey until shared, accent while shared, pulsing while work goes on.
             float d = S(8), mx = side, my = sub.Y + S(10);
             if (working && Motion.Control > 0)
@@ -2539,10 +3023,10 @@ namespace KnightSight
         // shared. A line sweeps over it while the assistant works, and a dot marks its last click.
         void DrawFinder(Graphics g, RectangleF finder)
         {
-            using (var path = Theme.Rounded(finder, S(10)))
+            using (var path = Theme.Rounded(finder, S(12)))
             using (var brush = new SolidBrush(Theme.Dark ? Color.FromArgb(18, 17, 16) : Theme.Surface2))
                 g.FillPath(brush, path);
-            var view = RectangleF.Inflate(finder, -S(14), -S(14));
+            var view = RectangleF.Inflate(finder, -S(18), -S(18));
             float t = Motion.Ease(lit);
             var shot = preview;
             if (chosen == null)
@@ -2572,7 +3056,7 @@ namespace KnightSight
                 }
             }
             var box = RectangleF.Inflate(finder, -S(corners), -S(corners));
-            float arm = S(16);
+            float arm = S(20);
             using (var pen = new Pen(Motion.Mix(Theme.Muted, Theme.Accent, t), S(2)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
                 foreach (var c in new[] { new PointF(box.Left, box.Top), new PointF(box.Right, box.Top), new PointF(box.Left, box.Bottom), new PointF(box.Right, box.Bottom) })
                 {
@@ -2612,7 +3096,7 @@ namespace KnightSight
         {
             if (now < previewDue || Interlocked.CompareExchange(ref previewBusy, 1, 0) != 0) return;
             previewDue = now + TimeSpan.TicksPerSecond;
-            var view = RectangleF.Inflate(Finder, -S(14), -S(14));
+            var view = RectangleF.Inflate(Finder, -S(18), -S(18));
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 Bitmap small = null;
@@ -2649,7 +3133,8 @@ namespace KnightSight
         void Texts(Graphics g, RectangleF head, RectangleF sub, string headText, string subText, float alpha, float dy)
         {
             int a = (int)(255 * alpha);
-            using (var format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+            // Typographic, so the text starts where its rectangle does instead of a few pixels in.
+            using (var format = new StringFormat(StringFormat.GenericTypographic) { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
             using (var title = new SolidBrush(Color.FromArgb(a, Theme.Text)))
             using (var body = new SolidBrush(Color.FromArgb(a, Theme.Secondary)))
             {
@@ -2666,6 +3151,7 @@ namespace KnightSight
             tick.Stop();
             frame.Hide();
             badge.Hide();
+            pointer.Vanish();
             pinboard.Hide();
             hotkeys.DestroyHandle();
             base.OnFormClosed(e);
@@ -2681,7 +3167,7 @@ namespace KnightSight
             else if (active && working) sub = Say.Doing + doing;
             else if (active && sentNote != null) sub = board.Fetched ? Say.Fetched : sentNote;
             else if (active) sub = Say.Shared;
-            else sub = c.Window != IntPtr.Zero ? Say.WindowChosen : Say.RegionChosen;
+            else sub = c.Window != IntPtr.Zero ? Say.WindowChosen : c.Screen ? Say.ScreenChosen : Say.RegionChosen;
             if (head != headline || sub != subline)
             {
                 oldHeadline = headline;
@@ -2690,7 +3176,7 @@ namespace KnightSight
                 subline = sub;
                 swap = 0;
             }
-            pickWindow.Enabled = pickRegion.Enabled = !active;
+            pickWindow.Enabled = pickRegion.Enabled = pickScreen.Enabled = !active;
             toggle.Enabled = c != null;
             toggle.Text = active ? Say.StopShare : Say.StartShare;
             toggle.Icon = active ? Glyph.Stop : Glyph.Start;
@@ -2719,21 +3205,29 @@ namespace KnightSight
                 if (h != IntPtr.Zero && !Win.IsOwn(h) && !ShellClasses.Contains(Win.Class(h)))
                 {
                     picking = false;
-                    Choose(new Share { Window = h, Title = Win.Title(h) });
+                    Choose(Share.Of(h));
                 }
             }
             buttonWasDown = down;
         }
 
-        void PickRegion()
+        void PickRegion() { Pick(new RegionPicker(), r => Say.Region + " " + r.Width + " x " + r.Height); }
+
+        // A whole screen is shared as a region of exactly its size.
+        void PickScreen()
+        {
+            var picker = new ScreenPicker(k);
+            Pick(picker, r => Say.ScreenTitle(picker.Number, r.Size));
+        }
+
+        void Pick(Picker picker, Func<Rectangle, string> title)
         {
             picking = false;
             Hide();
-            var picker = new RegionPicker();
             picker.FormClosed += (o, e) =>
             {
                 var r = picker.Result;
-                if (!r.IsEmpty) Choose(new Share { Region = r, Title = Say.Region + " " + r.Width + " x " + r.Height });
+                if (!r.IsEmpty) Choose(new Share { Region = r, Screen = picker is ScreenPicker, Title = title(r) });
                 Show();
                 Activate();
                 ShowState();
@@ -2746,6 +3240,7 @@ namespace KnightSight
         void Choose(Share share)
         {
             chosen = share;
+            pointer.Vanish();
             if (preview != null) { preview.Dispose(); preview = null; }
             previewDue = 0;
             board.Forget();
@@ -2759,6 +3254,8 @@ namespace KnightSight
         {
             if (chosen == null) return;
             active = true;
+            chosen.Elements = null;
+            chosen.Clicked = null;
             hotkeys.Register(2, Hotkeys.Control | Hotkeys.Shift, Keys.A);
             sentNote = null;
             ShowState();
@@ -2768,8 +3265,20 @@ namespace KnightSight
         {
             active = false;
             hotkeys.Release(2);
+            pointer.Vanish();
             sentNote = null;
             ClosePinboard();
+        }
+
+        // Ends the share the way a closed window does. The handle may already belong to another one.
+        void Lose(Share s)
+        {
+            if (chosen != s) return;
+            active = false;
+            hotkeys.Release(2);
+            frame.Hide();
+            HideBadge();
+            Choose(null);
         }
 
         void TogglePinboard()
@@ -2867,7 +3376,7 @@ namespace KnightSight
             var dotTarget = !active ? Theme.Neutral : working ? Motion.Mix(Theme.Accent, Theme.Warning, pulse) : Theme.Accent;
             if (dotTarget != dotColor || working && moving) { dotColor = dotTarget; Invalidate(); }
 
-            float litTo = active ? 1 : 0, cornersTo = active ? 6 : 14 + 6 * (moving ? 0.5f - 0.5f * (float)Math.Cos(2 * Math.PI * (now.Ticks / 10000 % 2400) / 2400) : 0);
+            float litTo = active ? 1 : 0, cornersTo = active ? 8 : 18 + 6 * (moving ? 0.5f - 0.5f * (float)Math.Cos(2 * Math.PI * (now.Ticks / 10000 % 2400) / 2400) : 0);
             lit = Motion.Step(lit, litTo, elapsed, Motion.Content);
             if (moving)
             {
@@ -2883,16 +3392,8 @@ namespace KnightSight
             if (c == null) { frame.Hide(); HideBadge(); return; }
             if (c.Window != IntPtr.Zero)
             {
-                if (!Native.IsWindow(c.Window))
-                {
-                    active = false;
-                    hotkeys.Release(2);
-                    frame.Hide();
-                    HideBadge();
-                    Choose(null);
-                    return;
-                }
-                if (Native.IsIconic(c.Window) || Win.IsCloaked(c.Window)) { frame.Hide(); HideBadge(); pinboard.Conceal(); return; }
+                if (c.Gone) { Lose(c); return; }
+                if (Native.IsIconic(c.Window) || Win.IsCloaked(c.Window)) { frame.Hide(); HideBadge(); pinboard.Conceal(); pointer.Vanish(); return; }
             }
 
             RefreshPreview(c, now.Ticks);
@@ -2907,7 +3408,7 @@ namespace KnightSight
             var area = c.Area;
             frame.Show(area, frameColor, width);
             if (board.Open && !badgeHeld) pinboard.Follow(area, Density(c));
-            Stack(c);
+            pointer.Follow(area, Stack(c));
 
             badgeAlpha = Motion.Step(badgeAlpha, working ? 1 : 0, elapsed, Motion.Content);
             if (badgeAlpha <= 0 || badgeHeld) { HideBadge(); return; }
@@ -2921,26 +3422,27 @@ namespace KnightSight
         }
 
         // Frame and badge sit right above a shared window: high enough to show, and no higher,
-        // so a window the person has laid over the share stays clear of them.
-        void Stack(Share s)
+        // so a window the person has laid over the share stays clear of them. Hands back the
+        // ones showing, which the assistant's pointer stacks above.
+        List<IntPtr> Stack(Share s)
         {
             var marks = new List<Form>(frame.Windows) { badge };
             marks.AddRange(pinboard.Windows);
             bool top = s.Window == IntPtr.Zero || Win.IsTopmost(s.Window);
             foreach (var mark in marks) if (mark.TopMost != top) mark.TopMost = top;
-            if (top) return;
-            if (active) Win.SinkPopups(s.Window);
-
             var handles = new List<IntPtr>();
             foreach (var mark in marks) if (mark.Visible) handles.Add(mark.Handle);
+            if (top) return handles;
+            if (active) Win.SinkPopups(s.Window);
+
             int seen = 0;
             var w = Win.Above(s.Window);
-            while (w != IntPtr.Zero && (handles.Contains(w) || Win.IsOwnedBy(w, s.Window)))
+            while (w != IntPtr.Zero && (handles.Contains(w) || pointer.Visible && w == pointer.Handle || Win.IsOwnedBy(w, s.Window)))
             {
                 if (handles.Contains(w)) seen++;
                 w = Win.Above(w);
             }
-            if (seen == handles.Count) return;
+            if (seen == handles.Count) return handles;
             foreach (var h in handles)
             {
                 if (w != IntPtr.Zero && !Win.IsTopmost(w))
@@ -2953,6 +3455,7 @@ namespace KnightSight
                 Native.SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, Win.KeepPlace);
                 Native.SetWindowPos(h, new IntPtr(-2), 0, 0, 0, 0, Win.KeepPlace);
             }
+            return handles;
         }
 
         // Above the top right corner of the frame, or inside it when the share reaches the top of its screen.
@@ -3062,6 +3565,7 @@ namespace KnightSight
         {
             var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
             var reply = new Dictionary<string, object>();
+            Input.Sent = false;
             try
             {
                 var args = json.Deserialize<Dictionary<string, object>>(line);
@@ -3076,6 +3580,11 @@ namespace KnightSight
                 }
                 var s = chosen;
                 if (s == null || !active) throw new Refused("Nothing is shared right now. Choose a window or a region in the KnightSight window and start sharing.");
+                if (s.Window != IntPtr.Zero && s.Gone)
+                {
+                    BeginInvoke((MethodInvoker)(() => Lose(s)));
+                    throw new Refused("The shared window has closed, so the share has ended.");
+                }
                 if (s.Window != IntPtr.Zero && Native.IsIconic(s.Window) && !Win.Unminimise(s.Window))
                     throw new Refused("The shared window is minimized and did not come back.");
                 var cmd = Str(args, "cmd");
@@ -3094,6 +3603,7 @@ namespace KnightSight
             }
             catch (Refused e) { reply.Clear(); reply["ok"] = false; reply["error"] = e.Message; }
             catch (Exception e) { reply.Clear(); reply["ok"] = false; reply["error"] = e.GetType().Name + ": " + e.Message; }
+            if (reply.ContainsKey("error") && Input.Sent) reply["delivered"] = "maybe";
             return json.Serialize(reply);
         }
 
@@ -3152,6 +3662,41 @@ namespace KnightSight
                 if (s.Window != IntPtr.Zero && Win.IsChromium(s.Window) && Win.IsFullyCovered(s.Window))
                     reply["note"] = "The window is fully covered. Chromium programs stop drawing then, so the picture may be out of date.";
             }
+            var area = s.Area;
+            var windows = Readable(s);
+            var found = windows == null ? null : ControlTree.Read(windows, area, Scale(area.Size));
+            s.Elements = found ?? new List<Element>();
+            if (found != null) reply["elements"] = found.ConvertAll(e => e.Fields());
+        }
+
+        // A region has no window of its own, so the one under its centre stands in for it.
+        // Menus and dialogs are windows of their own and show in the picture, so they count too.
+        static List<IntPtr> Readable(Share s)
+        {
+            var area = s.Area;
+            var root = s.Window != IntPtr.Zero ? s.Window : Win.RootAt(area.X + area.Width / 2, area.Y + area.Height / 2);
+            if (root == IntPtr.Zero || Win.IsOwn(root)) return null;
+            var windows = new List<IntPtr> { root };
+            windows.AddRange(Win.Popups(root));
+            return windows;
+        }
+
+        // A ref stands for the centre of its control in the last look's picture.
+        internal static void Aim(Dictionary<string, object> args, List<Element> last, string action)
+        {
+            object wanted;
+            if (args.TryGetValue("ref", out wanted) && wanted != null)
+            {
+                var name = Convert.ToString(wanted, CultureInfo.InvariantCulture);
+                var e = last == null ? null : last.Find(listed => listed.Ref == name);
+                if (e == null) throw new Refused("There is no element " + name + " from the last look. Take a new look.");
+                args["x"] = e.Box.X + e.Box.Width / 2.0;
+                args["y"] = e.Box.Y + e.Box.Height / 2.0;
+                return;
+            }
+            object x, y;
+            if (!args.TryGetValue("x", out x) || x == null || !args.TryGetValue("y", out y) || y == null)
+                throw new Refused(action + " needs x and y or a ref from look.");
         }
 
         // PrintWindow draws the window itself, so whatever lies on top of it stays private.
@@ -3227,6 +3772,34 @@ namespace KnightSight
             return new Point(x, y);
         }
 
+        internal static void Clear(Point p, IEnumerable<Rectangle> own)
+        {
+            foreach (var r in own)
+                if (r.Contains(p)) throw new Refused("That point lies on KnightSight itself.");
+        }
+
+        // In a region whatever shows at the point takes the input, which may be the panel or a
+        // card of the pinboard. A shared window gets its input posted, so nothing on top of it matters.
+        void KeepOff(Share s, Point p)
+        {
+            if (s.Window != IntPtr.Zero) return;
+            var own = new List<Rectangle>();
+            Invoke((MethodInvoker)(() =>
+            {
+                if (Visible && WindowState != FormWindowState.Minimized) own.Add(Win.Bounds(Handle));
+                foreach (var card in pinboard.Cards) if (card.Visible) own.Add(Win.Bounds(card.Handle));
+            }));
+            Clear(p, own);
+        }
+
+        // The assistant's pointer glides to the spot first, and the action waits until it is there.
+        void Present(IntPtr over, Point spot, int clicks)
+        {
+            int wait = 0;
+            Invoke((MethodInvoker)(() => wait = pointer.Aim(over, spot, clicks)));
+            Thread.Sleep(wait);
+        }
+
         // The window a click at this point belongs to. In a region that is whatever shows there.
         static IntPtr RootFor(Share s, Point p)
         {
@@ -3272,31 +3845,41 @@ namespace KnightSight
 
         string ClickAt(Share s, Dictionary<string, object> args)
         {
+            Aim(args, s.Elements, "Click");
             var p = ToScreen(s, args);
+            KeepOff(s, p);
             var area = s.Area;
-            clickX = (p.X - area.X) / (float)area.Width;
-            clickY = (p.Y - area.Y) / (float)area.Height;
+            var spot = new Point(p.X - area.X, p.Y - area.Y);
+            clickX = spot.X / (float)area.Width;
+            clickY = spot.Y / (float)area.Height;
             Interlocked.Exchange(ref clickTicks, DateTime.UtcNow.Ticks);
             bool right = Flag(args, "right"), twice = Flag(args, "double");
             var root = RootFor(s, p);
             if (s.Window == IntPtr.Zero) s.Focus = root;
+            s.Clicked = spot;
             Busy();
             if (Win.NeedsForeground(root))
             {
+                Present(root, spot, twice ? 2 : 1);
                 Foreground(root, () => Input.Click(p.X, p.Y, right, twice));
                 return "Clicked, briefly in the foreground.";
             }
             if (right && Win.IsChromium(root)) throw new Refused("Chromium programs take no right-click in the background. Their menus would stop responding.");
+            Present(root, spot, twice ? 2 : 1);
             Input.PostClick(Win.Deepest(Win.PopupAt(root, p), p), p, right, twice);
             return "Clicked.";
         }
 
         string ScrollAt(Share s, Dictionary<string, object> args)
         {
+            Aim(args, s.Elements, "Scroll");
             var p = ToScreen(s, args);
+            KeepOff(s, p);
             int notches = (int)Math.Round(Number(args, "amount"));
             var root = RootFor(s, p);
             Busy();
+            var area = s.Area;
+            Present(root, new Point(p.X - area.X, p.Y - area.Y), 0);
             if (Win.NeedsForeground(root))
             {
                 Foreground(root, () => Input.Scroll(p.X, p.Y, notches));
@@ -3326,7 +3909,11 @@ namespace KnightSight
         string TypeIn(Share s, string text)
         {
             var root = KeyRoot(s);
+            var area = s.Area;
+            var spot = s.Clicked ?? new Point(area.Width / 2, area.Height / 2);
+            KeepOff(s, new Point(area.X + spot.X, area.Y + spot.Y));
             Busy();
+            Present(root, spot, 0);
             if (Win.NeedsForeground(root))
             {
                 Foreground(root, () => Input.Type(text));
@@ -3340,6 +3927,7 @@ namespace KnightSight
         {
             var root = KeyRoot(s);
             Busy();
+            BeginInvoke((MethodInvoker)pointer.Keep);
             // Chromium only runs key combinations in a window that really is active.
             if (Win.NeedsForeground(root) || (Win.IsChromium(root) && keys.Contains("+")))
             {
