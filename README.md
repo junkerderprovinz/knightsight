@@ -95,7 +95,7 @@ The app and the quests in these pictures are made up.
 <br>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/region.png" alt="A yellow frame around part of the to-do app while text appears in its input field, a label reading Typing, and the panel showing Region 585 x 364" width="100%">
+  <img src="https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/region.png" alt="A yellow frame around part of the to-do app while text appears in its input field, a label reading Typing, and the panel showing Region 480 x 364" width="100%">
   <br><em>Drag a rectangle to share part of the screen. Here the assistant types into the field inside the box.</em>
 </p>
 

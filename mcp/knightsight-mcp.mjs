@@ -378,7 +378,7 @@ input.on('line', async (line) => {
         return answer({
           protocolVersion: msg.params?.protocolVersion ?? '2025-06-18',
           capabilities: { tools: {} },
-          serverInfo: { name: 'knightsight', version: '1.2.0' },
+          serverInfo: { name: 'knightsight', version: '1.2.1' },
         });
       case 'ping':
         return answer({});

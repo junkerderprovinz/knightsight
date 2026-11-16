@@ -70,6 +70,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="1.2.1" date="2026-11-16">
+      <description>
+        <p>A look lists the controls inside the share, which clicks can use. A Screen button shares a whole monitor, a yellow pointer shows where your assistant acts on X11, and the panel has more room.</p>
+      </description>
+      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.2.1</url>
+    </release>
     <release version="1.2.0" date="2026-11-16">
       <description>
         <p>A new panel with a finder: a small live picture of the shared window that turns from grey to colour when the share starts, with a sweeping line and a dot where your assistant clicks while it works. A minimized window comes back behind your other windows when your assistant asks for it, on X11.</p>

@@ -4,7 +4,13 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
-## Unreleased
+## v1.2.1 (2026-11-16)
+
+Controls in every look, whole screens and a pointer that shows where your assistant acts.
+
+## 🎨 Design
+
+- **A roomier panel.** The window is wider and calmer: a larger live picture, a larger title, more space between the rows and taller buttons. Window, Region and Screen sit in one row, the pinboard and the share button below.
 
 ## ✨ Added
 

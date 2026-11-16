@@ -104,10 +104,8 @@ public static class Stage
 
     public static void ChooseWindow(IntPtr h)
     {
-        var share = Activator.CreateInstance(app.GetType("KnightSight.Share"));
-        share.GetType().GetField("Window").SetValue(share, h);
-        share.GetType().GetField("Title").SetValue(share, Title(h));
-        Choose(share);
+        // Of also records the window's process, which the panel checks before every request.
+        Choose(app.GetType("KnightSight.Share").GetMethod("Of").Invoke(null, new object[] { h }));
     }
 
     public static void ChooseRegion(Rectangle r)
@@ -210,8 +208,8 @@ try {
     if ($app -eq [IntPtr]::Zero) { throw 'The app window did not show up.' }
     [Stage]::Launch((Resolve-Path $Exe).Path)
 
-    [Stage]::Place($app, (Rect 36 96 620 560))
-    [Stage]::MovePanel($desk.X + 680, $desk.Y + 260)
+    [Stage]::Place($app, (Rect 36 96 520 560))
+    [Stage]::MovePanel($desk.X + 572, $desk.Y + 250)
     [Stage]::ChooseWindow($app)
     Start-Sleep -Milliseconds 1200
     [Stage]::Shoot($desk, "$captures\pick.png")
@@ -226,9 +224,9 @@ try {
     Start-Sleep -Milliseconds 600
 
     # The region takes the input row and the first two columns, and the cut runs through the input.
-    [Stage]::Place($app, (Rect 30 40 650 620))
-    [Stage]::MovePanel($desk.X + 690, $desk.Y + 446)
-    $region = Rect 40 82 585 364
+    [Stage]::Place($app, (Rect 30 40 520 620))
+    [Stage]::MovePanel($desk.X + 572, $desk.Y + 380)
+    $region = Rect 40 82 480 364
     [Stage]::ChooseRegion($region)
     [Stage]::Start()
     Start-Sleep -Milliseconds 900
