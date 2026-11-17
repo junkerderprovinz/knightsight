@@ -6,7 +6,7 @@
 // The captures come from capture.ps1, which runs the real KnightSight.exe on Windows.
 //
 // Deps (global): playwright-core with its Chromium installed.
-// Run: node .github/assets/screenshots/render.mjs
+// Run: node .github/assets/screenshots/render.mjs [pick share region pinboard]
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -25,7 +25,9 @@ const SHOTS = [
   { name: 'pick', heading: 'Pick a window. <em>It sees nothing else.</em>' },
   { name: 'share', heading: 'No secret clicks. <em>The frame tells on it.</em>' },
   { name: 'region', heading: 'Just a corner? <em>Drag a box.</em>' },
+  { name: 'pinboard', heading: 'Point at it. <em>Leave a note.</em>' },
 ];
+const wanted = process.argv.slice(2);
 
 // The captures are 1300x700, shown 1270 wide.
 const SCREEN = { width: 1270, height: 684 };
@@ -86,7 +88,7 @@ const browser = await chromium.launch();
 try {
   const css = await style();
   const logo = dataUrl(readFileSync(join(repo, '.github', 'assets', 'logo.png')), 'image/png');
-  for (const shot of SHOTS) {
+  for (const shot of SHOTS.filter((s) => !wanted.length || wanted.includes(s.name))) {
     const big = await browser.newPage({ viewport: { width: 1920, height: 1000 }, deviceScaleFactor: 2 });
     await big.setContent(picture(css, logo, shot));
     await big.evaluate(() => document.fonts.ready);

@@ -101,6 +101,13 @@ The app and the quests in these pictures are made up.
 
 <br>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/junkerderprovinz/knightsight/main/.github/assets/screenshots/pinboard.png" alt="The to-do app in a yellow frame under the pinboard, with a blue bar along its bottom where Mark is selected, one quest lit up with its name above it, a note card open for the Add button, a pin next to another quest and a red box around a third" width="100%">
+  <br><em>While you share, Ctrl+Shift+A lays the pinboard over the window. Click an element, set a pin or drag a box, then write what you noticed.</em>
+</p>
+
+<br>
+
 <p><a id="4-what-it-does" href="#4-what-it-does"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/sections/4-what-it-does-dark.svg"><img src=".github/assets/sections/4-what-it-does.svg" alt="4. What it does" width="100%"></picture></a></p>
 
 - **You pick what it sees.** Click a window, drag a rectangle over part of the screen or share a whole screen. A grey frame marks your pick, and it turns yellow once you start sharing.
