@@ -389,13 +389,16 @@ namespace KnightSight
             return below;
         }
 
-        // The window, the named elements in between and the element itself. A long way keeps the
-        // window and the steps nearest the element.
+        // The window, the named elements in between and the element itself. A step that repeats
+        // the name above it, as Chromium's panes do with the window's title, tells nothing new.
+        // A long way keeps the window and the steps nearest the element.
         public static Target Describe(List<Part> parts, int i)
         {
             var chain = new List<Part>();
             for (int at = i; at >= 0; at = parts[at].Parent)
                 if (at == i || parts[at].Parent < 0 || parts[at].Name.Length > 0) chain.Insert(0, parts[at]);
+            for (int k = chain.Count - 2; k > 0; k--)
+                if (chain[k].Name == chain[k - 1].Name) chain.RemoveAt(k);
             if (chain.Count > LongestPath) chain.RemoveRange(1, chain.Count - LongestPath);
             var path = chain.ConvertAll(p => Step(p.Type, p.Name, n => "\"" + n + "\""));
             var shown = chain.ConvertAll(Shown);

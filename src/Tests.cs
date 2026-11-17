@@ -405,6 +405,18 @@ namespace KnightSight
             Same("menu \"File\" > menu item \"Save\"", ControlTree.Describe(Notepad(), 1).Path);
         }
 
+        static void StepThatRepeatsTheNameAboveItIsLeftOut()
+        {
+            var parts = new List<Part>
+            {
+                Node("window", "Quest Log", -1, 0, 0, 0, 900, 700),
+                Node("pane", "Quest Log", 0, 0, 0, 30, 900, 670),
+                Node("document", "Quest Log", 1, 0, 0, 30, 900, 670),
+                Node("button", "Add", 2, 0, 800, 80, 60, 36),
+            };
+            Same("window \"Quest Log\" > button \"Add\"", ControlTree.Describe(parts, 3).Path);
+        }
+
         static void LongPathKeepsTheWindowAndTheStepsNearestTheElement()
         {
             var parts = new List<Part> { Node("window", "Deep", -1, 0, 0, 0, 900, 900) };
