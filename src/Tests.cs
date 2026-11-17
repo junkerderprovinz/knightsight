@@ -52,9 +52,11 @@ namespace KnightSight
         {
             var board = new Board();
             board.Toggle(true);
-            foreach (var mark in marks) board.Add(new[] { mark }, NoteKind.Wish, "note at " + mark.Location, "Tester");
+            foreach (var mark in marks) board.Add(Marks(mark), NoteKind.Wish, "note at " + mark.Location, "Tester");
             return board;
         }
+
+        static Mark[] Marks(params RectangleF[] boxes) { return Array.ConvertAll(boxes, box => new Mark(box)); }
 
         static Dictionary<string, object> RoundOf(Board board, Size shot, float density)
         {
@@ -67,7 +69,7 @@ namespace KnightSight
             return (Dictionary<string, object>)((IList)round["notes"])[note];
         }
 
-        static Dictionary<string, object> Mark(Dictionary<string, object> note, int mark)
+        static Dictionary<string, object> MarkOf(Dictionary<string, object> note, int mark)
         {
             return (Dictionary<string, object>)((IList)note["marks"])[mark];
         }
@@ -160,7 +162,7 @@ namespace KnightSight
             Same(0, board.Notes.Count);
             True(!board.Open, "sending closes the pinboard");
             board.Toggle(true);
-            Same(3, board.Add(new[] { new RectangleF(3, 3, 0, 0) }, NoteKind.Bug, "third", "").Number);
+            Same(3, board.Add(Marks(new RectangleF(3, 3, 0, 0)), NoteKind.Bug, "third", "").Number);
         }
 
         static void NothingSentYetAnswersRoundZero()
@@ -193,8 +195,8 @@ namespace KnightSight
         static void RoundDescribesEachNoteInPictureCoordinates()
         {
             var board = BoardWith();
-            board.Add(new[] { new RectangleF(100, 50, 40, 30) }, NoteKind.Bug, "Cut off", "Junker");
-            board.Add(new[] { new RectangleF(300, 200, 0, 0) }, NoteKind.Question, "Why?", "Junker");
+            board.Add(Marks(new RectangleF(100, 50, 40, 30)), NoteKind.Bug, "Cut off", "Junker");
+            board.Add(Marks(new RectangleF(300, 200, 0, 0)), NoteKind.Question, "Why?", "Junker");
             var round = RoundOf(board, new Size(800, 600), 1);
             Same(1, round["round"]);
             Same("2026-11-15T13:03:12Z", round["sent"]);
@@ -207,7 +209,7 @@ namespace KnightSight
             Same("Cut off", bug["text"]);
             Same("Junker", bug["author"]);
             True(!bug.ContainsKey("x"), "the place belongs to the marks");
-            var box = Mark(bug, 0);
+            var box = MarkOf(bug, 0);
             Same("1", box["label"]);
             Same(100, box["x"]);
             Same(50, box["y"]);
@@ -216,7 +218,7 @@ namespace KnightSight
             True(!box.ContainsKey("pin"), "a box is no pin");
             var question = Field(round, 1);
             Same("question", question["kind"]);
-            var pin = Mark(question, 0);
+            var pin = MarkOf(question, 0);
             Same("2", pin["label"]);
             Same(true, pin["pin"]);
             Same(300, pin["x"]);
@@ -230,7 +232,7 @@ namespace KnightSight
             Same(1568, round["width"]);
             Same(1000, round["height"]);
             Same(new Size(1568, 1000), PngSize(round["image"]));
-            var note = Mark(Field(round, 0), 0);
+            var note = MarkOf(Field(round, 0), 0);
             Same(500, note["x"]);
             Same(250, note["y"]);
             Same(100, note["width"]);
@@ -240,7 +242,7 @@ namespace KnightSight
         static void RoundOfAWindowOnADenseScreenCountsInItsPixels()
         {
             var board = BoardWith(new RectangleF(100, 50, 40, 30));
-            var note = Mark(Field(RoundOf(board, new Size(1200, 900), 1.5f), 0), 0);
+            var note = MarkOf(Field(RoundOf(board, new Size(1200, 900), 1.5f), 0), 0);
             Same(150, note["x"]);
             Same(75, note["y"]);
             Same(60, note["width"]);
@@ -256,7 +258,7 @@ namespace KnightSight
         static void SavedPageShowsTheNotesEscaped()
         {
             var board = BoardWith();
-            board.Add(new[] { new RectangleF(10, 10, 20, 20) }, NoteKind.Bug, "<b>Too</b> & wide", "Junker");
+            board.Add(Marks(new RectangleF(10, 10, 20, 20)), NoteKind.Bug, "<b>Too</b> & wide", "Junker");
             string page;
             using (var bmp = new Bitmap(100, 100)) page = Board.Page(board.Seal(bmp, 1, "A <window>", DateTime.UtcNow));
             True(page.Contains("&lt;b&gt;Too&lt;/b&gt; &amp; wide"), "the note text is escaped");
@@ -279,34 +281,34 @@ namespace KnightSight
 
         static void NoteTakesUpToTwentySixMarks()
         {
-            var marks = new List<RectangleF>();
-            for (int i = 0; i < 25; i++) True(Note.AddMark(marks, new RectangleF(i, i, 0, 0)), "mark " + (i + 1) + " fits");
-            True(Note.AddMark(marks, new RectangleF(50, 50, 10, 10)), "the twenty-sixth fits");
-            True(!Note.AddMark(marks, new RectangleF(60, 60, 0, 0)), "a twenty-seventh does not");
+            var marks = new List<Mark>();
+            for (int i = 0; i < 25; i++) True(Note.AddMark(marks, new Mark(new RectangleF(i, i, 0, 0))), "mark " + (i + 1) + " fits");
+            True(Note.AddMark(marks, new Mark(new RectangleF(50, 50, 10, 10))), "the twenty-sixth fits");
+            True(!Note.AddMark(marks, new Mark(new RectangleF(60, 60, 0, 0))), "a twenty-seventh does not");
             Same(26, marks.Count);
         }
 
         static void LastMarkOfANoteStays()
         {
-            var marks = new List<RectangleF> { new RectangleF(1, 1, 0, 0) };
+            var marks = new List<Mark>(Marks(new RectangleF(1, 1, 0, 0)));
             True(!Note.RemoveMark(marks, 0), "the only mark stays");
             Same(1, marks.Count);
-            marks.Add(new RectangleF(5, 5, 10, 10));
+            marks.Add(new Mark(new RectangleF(5, 5, 10, 10)));
             True(Note.RemoveMark(marks, 0), "one of two goes");
-            Same(new RectangleF(5, 5, 10, 10), marks[0]);
+            Same(new RectangleF(5, 5, 10, 10), marks[0].Box);
         }
 
         static void RoundGivesEachMarkItsOwnLabelAndCrop()
         {
             var board = BoardWith();
-            board.Add(new[] { new RectangleF(100, 50, 40, 30), new RectangleF(300, 200, 0, 0) }, NoteKind.Bug, "Two spots", "Junker");
+            board.Add(Marks(new RectangleF(100, 50, 40, 30), new RectangleF(300, 200, 0, 0)), NoteKind.Bug, "Two spots", "Junker");
             var note = Field(RoundOf(board, new Size(800, 600), 1), 0);
             Same(2, ((IList)note["marks"]).Count);
-            var box = Mark(note, 0);
+            var box = MarkOf(note, 0);
             Same("1a", box["label"]);
             Same(40, box["width"]);
             Same(new Size(88, 78), PngSize(box["image"]));
-            var pin = Mark(note, 1);
+            var pin = MarkOf(note, 1);
             Same("1b", pin["label"]);
             Same(true, pin["pin"]);
             Same(new Size(240, 240), PngSize(pin["image"]));
@@ -315,11 +317,184 @@ namespace KnightSight
         static void SavedPageShowsEveryCropWithItsLabel()
         {
             var board = BoardWith();
-            board.Add(new[] { new RectangleF(10, 10, 20, 20), new RectangleF(60, 60, 0, 0) }, NoteKind.Wish, "Both", "");
+            board.Add(Marks(new RectangleF(10, 10, 20, 20), new RectangleF(60, 60, 0, 0)), NoteKind.Wish, "Both", "");
             string page;
             using (var bmp = new Bitmap(100, 100)) page = Board.Page(board.Seal(bmp, 1, "t", DateTime.UtcNow));
             True(page.Contains(">1a<") && page.Contains(">1b<"), "both labels are on the page");
             Same(3, page.Split(new[] { "data:image/png;base64," }, StringSplitOptions.None).Length - 1);
+        }
+
+        static Part Node(string type, string name, int parent, int layer, int x, int y, int width, int height)
+        {
+            return new Part { Type = type, Local = "", Name = name, Parent = parent, Layer = layer, Box = new Rectangle(x, y, width, height) };
+        }
+
+        // A Notepad window with its File menu open above it.
+        static List<Part> Notepad()
+        {
+            return new List<Part>
+            {
+                Node("menu", "File", -1, 0, 10, 40, 200, 300),
+                Node("menu item", "Save", 0, 0, 12, 80, 196, 24),
+                Node("window", "notes.txt - Notepad", -1, 1, 0, 0, 800, 600),
+                Node("pane", "", 2, 1, 0, 30, 800, 570),
+                Node("menu bar", "Application", 3, 1, 0, 30, 800, 24),
+                Node("menu item", "Edit", 4, 1, 50, 30, 40, 24),
+                Node("document", "Text editor", 3, 1, 0, 54, 800, 546),
+                Node("pane", "", 6, 1, 0, 54, 800, 546),
+                Node("button", "", 7, 1, 780, 54, 20, 20),
+            };
+        }
+
+        static void SmallestElementUnderThePointerIsFound()
+        {
+            var parts = Notepad();
+            Same(5, ControlTree.At(parts, new Point(60, 35)));
+            Same(4, ControlTree.At(parts, new Point(500, 35)));
+            Same(8, ControlTree.At(parts, new Point(790, 60)));
+        }
+
+        static void OpenMenuComesBeforeTheWindowUnderIt()
+        {
+            Same(1, ControlTree.At(Notepad(), new Point(100, 90)));
+        }
+
+        static void OfTwoElementsTheSameSizeTheDeeperOneIsFound()
+        {
+            Same(7, ControlTree.At(Notepad(), new Point(400, 300)));
+        }
+
+        static void PointOutsideEveryElementFindsNothing()
+        {
+            Same(-1, ControlTree.At(Notepad(), new Point(900, 900)));
+        }
+
+        static void WalkingUpSkipsAnElementOfTheSameSize()
+        {
+            var parts = Notepad();
+            Same(7, ControlTree.Up(parts, 8));
+            Same(3, ControlTree.Up(parts, 7));
+            Same(-1, ControlTree.Up(parts, 2));
+            Same(-1, ControlTree.Up(parts, 0));
+        }
+
+        static void WalkingDownReturnsTowardsTheFirstElementFound()
+        {
+            var parts = Notepad();
+            Same(7, ControlTree.Down(parts, 8, 3));
+            Same(8, ControlTree.Down(parts, 8, 7));
+            Same(8, ControlTree.Down(parts, 8, 8));
+        }
+
+        static void PathNamesTheWindowAndTheNamedStepsDownToTheElement()
+        {
+            var target = ControlTree.Describe(Notepad(), 5);
+            Same("menu item", target.Type);
+            Same("Edit", target.Name);
+            Same("window \"notes.txt - Notepad\" > menu bar \"Application\" > menu item \"Edit\"", target.Path);
+        }
+
+        static void NamelessElementGoesByItsType()
+        {
+            Same("window \"notes.txt - Notepad\" > document \"Text editor\" > button", ControlTree.Describe(Notepad(), 8).Path);
+        }
+
+        static void PathInAMenuStartsAtTheMenu()
+        {
+            Same("menu \"File\" > menu item \"Save\"", ControlTree.Describe(Notepad(), 1).Path);
+        }
+
+        static void LongPathKeepsTheWindowAndTheStepsNearestTheElement()
+        {
+            var parts = new List<Part> { Node("window", "Deep", -1, 0, 0, 0, 900, 900) };
+            for (int i = 1; i <= 7; i++) parts.Add(Node("group", "Level " + i, i - 1, 0, i, i, 900 - 2 * i, 900 - 2 * i));
+            Same("window \"Deep\" > group \"Level 4\" > group \"Level 5\" > group \"Level 6\" > group \"Level 7\"", ControlTree.Describe(parts, 7).Path);
+        }
+
+        static void ShownPathUsesTheWordsOfThePersonsWindows()
+        {
+            var parts = new List<Part> { Node("window", "Editor", -1, 0, 0, 0, 400, 300), Node("button", "Speichern", 0, 0, 10, 10, 80, 24) };
+            parts[0].Local = "Fenster";
+            parts[1].Local = "Schaltfläche";
+            var target = ControlTree.Describe(parts, 1);
+            Same("Fenster " + Say.Quote("Editor") + " > Schaltfläche " + Say.Quote("Speichern"), target.Shown);
+            Same("Schaltfläche " + Say.Quote("Speichern"), target.Own);
+            Same("window \"Editor\" > button \"Speichern\"", target.Path);
+        }
+
+        static void ControlTypesReadAsWords()
+        {
+            Same("menu item", ControlTree.TypeName(ControlType.MenuItem));
+            Same("button", ControlTree.TypeName(ControlType.Button));
+            Same("split button", ControlTree.TypeName(ControlType.SplitButton));
+            Same("element", ControlTree.TypeName(null));
+        }
+
+        static Target SaveButton()
+        {
+            return new Target { Type = "button", Name = "Save", Path = "window \"Quest Log\" > button \"Save\"", Shown = "button \"Save\" in Quest Log", Own = "button \"Save\"" };
+        }
+
+        static void RoundNamesTheElementAMarkSitsOn()
+        {
+            var board = BoardWith();
+            board.Add(new[] { new Mark(new RectangleF(100, 50, 40, 30), SaveButton()), new Mark(new RectangleF(300, 200, 60, 20)) }, NoteKind.Bug, "Does nothing", "Junker");
+            var note = Field(RoundOf(board, new Size(800, 600), 1), 0);
+            var element = (Dictionary<string, object>)MarkOf(note, 0)["element"];
+            Same("button", element["type"]);
+            Same("Save", element["name"]);
+            Same("window \"Quest Log\" > button \"Save\"", element["path"]);
+            Same(40, MarkOf(note, 0)["width"]);
+            True(!MarkOf(note, 1).ContainsKey("element"), "an area names no element");
+        }
+
+        static void ElementOfAMarkSurvivesTheJsonSerializer()
+        {
+            var board = BoardWith();
+            board.Add(new[] { new Mark(new RectangleF(10, 10, 20, 20), SaveButton()) }, NoteKind.Wish, "Bigger", "");
+            var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(RoundOf(board, new Size(100, 100), 1));
+            True(json.Contains("\"element\":{\"type\":\"button\",\"name\":\"Save\",\"path\":"), json.Substring(json.IndexOf("\"marks\""), 200));
+        }
+
+        static void NoteCardSaysWhereItsMarksSit()
+        {
+            var element = new Mark(new RectangleF(10, 10, 20, 20), SaveButton());
+            var pin = new Mark(new RectangleF(5, 5, 0, 0));
+            var box = new Mark(new RectangleF(1, 1, 160, 40));
+            Same("button \"Save\" in Quest Log", Mark.Describe(new[] { element }));
+            Same(Say.PinSpot, Mark.Describe(new[] { pin }));
+            Same(Say.AreaSpot(new SizeF(160, 40)), Mark.Describe(new[] { box }));
+            Same(Say.Spots(3) + ": button \"Save\", " + Say.PinSpot + ", " + Say.AreaSpot(new SizeF(160, 40)), Mark.Describe(new[] { element, pin, box }));
+        }
+
+        static void PinboardStartsWithMarking()
+        {
+            Same(Tool.Mark, new Pinboard(new Board(), 1).Bar.Tool);
+        }
+
+        static void KeysPickTheTool()
+        {
+            var pinboard = new Pinboard(new Board(), 1);
+            True(pinboard.Key(Keys.P), "P is taken");
+            Same(Tool.Pin, pinboard.Bar.Tool);
+            pinboard.Key(Keys.B);
+            Same(Tool.Area, pinboard.Bar.Tool);
+            pinboard.Key(Keys.N);
+            Same(Tool.Mark, pinboard.Bar.Tool);
+            True(!pinboard.Key(Keys.Control | Keys.P), "Ctrl+P is left alone");
+            Same(Tool.Mark, pinboard.Bar.Tool);
+        }
+
+        static void ArrowsWalkOnlyWhileAnElementIsLit()
+        {
+            True(!new Pinboard(new Board(), 1).Key(Keys.Up), "nothing to walk from");
+        }
+
+        static void BarCountsTheNotes()
+        {
+            var board = BoardWith(new RectangleF(1, 1, 5, 5), new RectangleF(2, 2, 0, 0));
+            Same(2, new Pinboard(board, 1).Bar.Count);
+            Same(0, new Pinboard(new Board(), 1).Bar.Count);
         }
 
         static Element Found(string role, string name, int x, int y, int width, int height)

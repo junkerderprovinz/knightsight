@@ -143,7 +143,7 @@ namespace KnightSight
 
         public static readonly string Pinboard = Pick("Pinboard", "Pinnwand");
         public static readonly string PinboardTip = Pick("Pinboard (Ctrl+Shift+A)", "Pinnwand (Strg+Umschalt+A)");
-        public static readonly string PinboardOn = Pick("Pinboard on. Drag a box or click to set a pin.", "Pinnwand an. Markier eine Stelle oder setz eine Nadel.");
+        public static readonly string PinboardOn = Pick("Pinboard on. Mark an element, set a pin or drag an area.", "Pinnwand an. Markier ein Element, setz eine Nadel oder zieh einen Bereich auf.");
         public static readonly string Fetched = Pick("Your assistant has fetched your notes.", "Dein Assistent hat deine Notizen abgeholt.");
         public static readonly string[] Kinds = { Pick("Bug", "Fehler"), Pick("Wish", "Wunsch"), Pick("Question", "Frage") };
         public static readonly string NewNote = Pick("New note", "Neue Notiz");
@@ -152,11 +152,25 @@ namespace KnightSight
         public static readonly string MoreSpots = Pick("Hold Shift to add more spots to this note.", "Mit Umschalt markierst du weitere Stellen dazu.");
         public static readonly string Save = Pick("Save", "Speichern");
         public static readonly string Delete = Pick("Delete", "Löschen");
-        public static readonly string EmptyBoard = Pick("Drag a box around a spot or click to set a pin.", "Zieh ein Rechteck um eine Stelle oder klick für eine Nadel.");
+        public static readonly string EmptyBoard = Pick("Press N to mark an element, P to set a pin or B to drag an area.", "Drück N zum Markieren, P für eine Nadel oder B für einen Bereich.");
         public static readonly string GoThere = Pick("Go there", "Hingehen");
         public static readonly string SaveFile = Pick("Save as file", "Als Datei speichern");
         public static readonly string Done = Pick("Done", "Fertig");
         public static readonly string ClosePinboard = Pick("Close pinboard", "Pinnwand schließen");
+        public static readonly string CloseList = Pick("Close the list", "Liste schließen");
+        public static readonly string Notes = Pick("Notes", "Notizen");
+        public static readonly string MarkTool = Pick("Mark", "Markieren");
+        public static readonly string PinTool = Pick("Pin", "Nadel");
+        public static readonly string AreaTool = Pick("Area", "Bereich");
+        public static readonly string MarkTip = Pick("Point at an element and click to mark it (N)", "Auf ein Element zeigen und klicken, um es zu markieren (N)");
+        public static readonly string PinTip = Pick("Click anywhere to set a pin (P)", "Irgendwo klicken, um eine Nadel zu setzen (P)");
+        public static readonly string AreaTip = Pick("Drag a box around a spot (B)", "Ein Rechteck um eine Stelle ziehen (B)");
+        public static readonly string NotesTip = Pick("See all notes or save them as a file", "Alle Notizen ansehen oder als Datei speichern");
+        public static readonly string DoneTip = Pick("Hand the notes to your assistant", "Die Notizen an deinen Assistenten geben");
+        public static readonly string ThemeTip = Pick("Switch between light and dark", "Zwischen hell und dunkel wechseln");
+        public static readonly string WalkUp = Pick("Scroll up or press ↑ for the part around it", "Nach oben scrollen oder ↑ drücken für den Teil drumherum");
+        public static readonly string NoParts = Pick("This window shows no elements here. Drag a box instead, just like with Area (B).", "Dieses Fenster zeigt hier keine Elemente. Zieh einfach ein Rechteck auf, wie mit Bereich (B).");
+        public static readonly string PinSpot = Pick("Pin", "Nadel");
         public static readonly string FileKind = Pick("Pinboard notes", "Pinnwand-Notizen");
         public static readonly string FileName = Pick("knightsight-notes.html", "knightsight-notizen.html");
         public static readonly string Language = Pick("en", "de");
@@ -167,6 +181,8 @@ namespace KnightSight
         public static string Round(int number) { return Pick("Round ", "Runde ") + number; }
         public static string From(string author) { return Pick("from ", "von ") + author; }
         public static string NotesOn(string title) { return Pick("Pinboard notes on ", "Pinnwand-Notizen zu ") + title; }
+        public static string AreaSpot(SizeF size) { return Pick("Area ", "Bereich ") + Math.Round(size.Width) + " x " + Math.Round(size.Height); }
+        public static string Quote(string name) { return Pick("\"" + name + "\"", "„" + name + "“"); }
 
         public static string Sent(int count)
         {
@@ -254,11 +270,28 @@ namespace KnightSight
         }
     }
 
+    // One element of the shared window for the pinboard to point at, in screen pixels. Parent is
+    // its index in the same list, -1 for a window. Layer counts the windows from the top, so a
+    // menu comes before the window that owns it.
+    class Part
+    {
+        public string Type, Local, Name;
+        public Rectangle Box;
+        public int Parent, Layer;
+    }
+
+    // The element of the shared window a mark sits on. Path leads down to it from the window in
+    // English, for the assistant. Shown says the same for the person, Own only the element.
+    class Target
+    {
+        public string Type, Name, Path, Shown, Own;
+    }
+
     // Reads the controls of a window through UI Automation. The walk runs on a thread of its
     // own, so a program that answers slowly holds up a look for the budget at most.
     static class ControlTree
     {
-        const int Most = 150, LongestName = 80;
+        const int Most = 150, LongestName = 80, MostParts = 4000, LongestPath = 5;
         static readonly TimeSpan Budget = TimeSpan.FromMilliseconds(1500);
 
         static readonly Dictionary<ControlType, string> Roles = new Dictionary<ControlType, string>
@@ -283,10 +316,163 @@ namespace KnightSight
         {
             var role = Role(type);
             if (role == null || offscreen || box.Width <= 0 || box.Height <= 0) return null;
-            name = password ? "" : string.Join(" ", (name ?? "").Split((char[])null, StringSplitOptions.RemoveEmptyEntries));
-            if (name.Length > LongestName) name = name.Substring(0, LongestName);
+            name = Clean(name, password);
             if (name.Length == 0 && (!enabled || role == "text")) return null;
             return new Element { Role = role, Name = name, Box = box };
+        }
+
+        static string Clean(string name, bool password)
+        {
+            if (password) return "";
+            name = string.Join(" ", (name ?? "").Split((char[])null, StringSplitOptions.RemoveEmptyEntries));
+            return name.Length > LongestName ? name.Substring(0, LongestName) : name;
+        }
+
+        // In words, such as "menu item", for the assistant whatever language Windows speaks.
+        public static string TypeName(ControlType type)
+        {
+            if (type == null) return "element";
+            var name = type.ProgrammaticName;
+            name = name.Substring(name.IndexOf('.') + 1);
+            var words = new StringBuilder();
+            foreach (char c in name)
+            {
+                if (char.IsUpper(c) && words.Length > 0) words.Append(' ');
+                words.Append(char.ToLowerInvariant(c));
+            }
+            return words.ToString();
+        }
+
+        // The smallest element under the point in the topmost window that has one there, or -1.
+        // Of two the same size the later one wins, which the walk met deeper down.
+        public static int At(List<Part> parts, Point p)
+        {
+            int best = -1;
+            for (int i = 0; i < parts.Count; i++)
+            {
+                var part = parts[i];
+                if (!part.Box.Contains(p)) continue;
+                if (best < 0 || part.Layer < parts[best].Layer || part.Layer == parts[best].Layer && Extent(part.Box) <= Extent(parts[best].Box)) best = i;
+            }
+            return best;
+        }
+
+        static long Extent(Rectangle r) { return (long)r.Width * r.Height; }
+
+        // The element around this one, skipping those that cover exactly the same box, so every
+        // step up shows. -1 above the window.
+        public static int Up(List<Part> parts, int i)
+        {
+            for (int p = parts[i].Parent; p >= 0; p = parts[p].Parent)
+                if (parts[p].Box != parts[i].Box) return p;
+            return -1;
+        }
+
+        // One step back from current towards hit, the element first found under the pointer.
+        public static int Down(List<Part> parts, int hit, int current)
+        {
+            int below = hit;
+            for (int i = hit; i >= 0 && i != current; i = Up(parts, i)) below = i;
+            return below;
+        }
+
+        // The window, the named elements in between and the element itself. A long way keeps the
+        // window and the steps nearest the element.
+        public static Target Describe(List<Part> parts, int i)
+        {
+            var chain = new List<Part>();
+            for (int at = i; at >= 0; at = parts[at].Parent)
+                if (at == i || parts[at].Parent < 0 || parts[at].Name.Length > 0) chain.Insert(0, parts[at]);
+            if (chain.Count > LongestPath) chain.RemoveRange(1, chain.Count - LongestPath);
+            var path = chain.ConvertAll(p => Step(p.Type, p.Name, n => "\"" + n + "\""));
+            var shown = chain.ConvertAll(Shown);
+            return new Target
+            {
+                Type = parts[i].Type, Name = parts[i].Name,
+                Path = string.Join(" > ", path), Shown = string.Join(" > ", shown), Own = shown[shown.Count - 1],
+            };
+        }
+
+        // The element alone, in the words of the person's Windows.
+        public static string Shown(Part p) { return Step(p.Local.Length > 0 ? p.Local : p.Type, p.Name, Say.Quote); }
+
+        static string Step(string type, string name, Func<string, string> quote)
+        {
+            return name.Length > 0 ? type + " " + quote(name) : type;
+        }
+
+        // Every element of the windows, topmost window first, for the pinboard. Unlike a look it
+        // keeps the containers too, since a mark may grow out to them. Null when the walk broke.
+        public static List<Part> Parts(List<IntPtr> windows)
+        {
+            var found = new List<Part>();
+            bool broke = false;
+            var clock = Stopwatch.StartNew();
+            var walker = new Thread(() =>
+            {
+                try { Gather(windows, found, clock); }
+                catch (Exception) { lock (found) broke = true; }
+            }) { IsBackground = true };
+            walker.Start();
+            walker.Join(Budget + TimeSpan.FromMilliseconds(200));
+            lock (found) return broke ? null : new List<Part>(found);
+        }
+
+        static void Gather(List<IntPtr> windows, List<Part> found, Stopwatch clock)
+        {
+            var cache = new CacheRequest();
+            cache.Add(AutomationElement.NameProperty);
+            cache.Add(AutomationElement.ControlTypeProperty);
+            cache.Add(AutomationElement.LocalizedControlTypeProperty);
+            cache.Add(AutomationElement.BoundingRectangleProperty);
+            cache.Add(AutomationElement.IsOffscreenProperty);
+            cache.Add(AutomationElement.IsPasswordProperty);
+            var tree = TreeWalker.ControlViewWalker;
+            var pending = new Queue<Waiting>();
+            for (int layer = 0; layer < windows.Count; layer++)
+            {
+                AutomationElement top;
+                try { top = AutomationElement.FromHandle(windows[layer]).GetUpdatedCache(cache); }
+                catch (ElementNotAvailableException) { continue; }
+                pending.Enqueue(new Waiting { Element = top, Parent = Add(found, top, -1, layer), Layer = layer });
+            }
+            while (pending.Count > 0 && clock.Elapsed < Budget && found.Count < MostParts)
+            {
+                var next = pending.Dequeue();
+                AutomationElement child;
+                try { child = tree.GetFirstChild(next.Element, cache); }
+                catch (ElementNotAvailableException) { continue; }
+                while (child != null && clock.Elapsed < Budget && found.Count < MostParts)
+                {
+                    int own = Add(found, child, next.Parent, next.Layer);
+                    pending.Enqueue(new Waiting { Element = child, Parent = own < 0 ? next.Parent : own, Layer = next.Layer });
+                    try { child = tree.GetNextSibling(child, cache); }
+                    catch (ElementNotAvailableException) { child = null; }
+                }
+            }
+        }
+
+        // An element still to be walked, with the index its children hang from: its own, or the
+        // one above it when it was left out for having no box.
+        struct Waiting
+        {
+            public AutomationElement Element;
+            public int Parent, Layer;
+        }
+
+        static int Add(List<Part> found, AutomationElement e, int parent, int layer)
+        {
+            var c = e.Cached;
+            var r = c.BoundingRectangle;
+            if (r.IsEmpty || c.IsOffscreen) return -1;
+            var box = Rectangle.FromLTRB((int)Math.Floor(r.Left), (int)Math.Floor(r.Top), (int)Math.Ceiling(r.Right), (int)Math.Ceiling(r.Bottom));
+            if (box.Width <= 0 || box.Height <= 0) return -1;
+            var part = new Part { Type = TypeName(c.ControlType), Local = c.LocalizedControlType ?? "", Name = Clean(c.Name, c.IsPassword), Box = box, Parent = parent, Layer = layer };
+            lock (found)
+            {
+                found.Add(part);
+                return found.Count - 1;
+            }
         }
 
         // Clips to the share, scales into the picture and numbers the controls in reading order.
@@ -386,6 +572,20 @@ namespace KnightSight
         }
 
         // The DWM bounds leave out the invisible resize border that GetWindowRect counts.
+        // The top window at the point other than KnightSight's own, for when the pinboard's layer
+        // lies over it. Click-through windows are passed over the way WindowFromPoint does.
+        public static IntPtr OtherAt(int x, int y)
+        {
+            var found = IntPtr.Zero;
+            Native.EnumWindows((h, param) =>
+            {
+                if (!Native.IsWindowVisible(h) || IsCloaked(h) || IsOwn(h) || (Native.GetWindowLong(h, -20) & 0x20) != 0 || !Bounds(h).Contains(x, y)) return true;
+                found = h;
+                return false;
+            }, IntPtr.Zero);
+            return found;
+        }
+
         public static Rectangle Bounds(IntPtr h)
         {
             Native.RECT r;
@@ -1401,7 +1601,18 @@ namespace KnightSight
         }
     }
 
-    // The GlimStone palette for the two themes, and Noto Sans, which the build embeds.
+    // What KnightSight keeps for the person between runs.
+    static class Saved
+    {
+        const string Key = @"HKEY_CURRENT_USER\Software\KnightSight";
+
+        public static string Get(string name) { return Microsoft.Win32.Registry.GetValue(Key, name, "") as string ?? ""; }
+
+        public static void Set(string name, string value) { Microsoft.Win32.Registry.SetValue(Key, name, value); }
+    }
+
+    // The GlimStone palette for the two themes, and Noto Sans, which the build embeds. The theme
+    // follows Windows until the person picks one on the pinboard.
     static class Theme
     {
         public static readonly Color Accent = Color.FromArgb(252, 196, 25);
@@ -1417,16 +1628,9 @@ namespace KnightSight
 
         public static void Load()
         {
+            var chosen = Saved.Get("Theme");
             var v = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1);
-            Dark = v is int && (int)v == 0;
-            Ground = Dark ? Color.FromArgb(15, 14, 12) : Color.FromArgb(245, 243, 239);
-            Surface = Dark ? Color.FromArgb(28, 26, 23) : Color.White;
-            Surface2 = Dark ? Color.FromArgb(52, 48, 43) : Color.FromArgb(233, 230, 224);
-            Surface3 = Dark ? Color.FromArgb(78, 73, 66) : Color.FromArgb(210, 205, 197);
-            Hover = Dark ? Color.FromArgb(46, 43, 38) : Color.FromArgb(225, 221, 214);
-            Text = Dark ? Color.FromArgb(240, 236, 228) : Color.FromArgb(24, 22, 19);
-            Secondary = Dark ? Color.FromArgb(190, 184, 173) : Color.FromArgb(86, 81, 73);
-            Muted = Dark ? Color.FromArgb(140, 134, 124) : Color.FromArgb(115, 109, 100);
+            Use(chosen.Length > 0 ? chosen == "dark" : v is int && (int)v == 0);
 
             foreach (var name in new[] { "NotoSans-Regular.ttf", "NotoSans-SemiBold.ttf" })
             {
@@ -1448,6 +1652,19 @@ namespace KnightSight
                 if (f.Name.Contains("SemiBold")) SemiBold = f;
                 else Regular = f;
             }
+        }
+
+        public static void Use(bool dark)
+        {
+            Dark = dark;
+            Ground = Dark ? Color.FromArgb(15, 14, 12) : Color.FromArgb(245, 243, 239);
+            Surface = Dark ? Color.FromArgb(28, 26, 23) : Color.White;
+            Surface2 = Dark ? Color.FromArgb(52, 48, 43) : Color.FromArgb(233, 230, 224);
+            Surface3 = Dark ? Color.FromArgb(78, 73, 66) : Color.FromArgb(210, 205, 197);
+            Hover = Dark ? Color.FromArgb(46, 43, 38) : Color.FromArgb(225, 221, 214);
+            Text = Dark ? Color.FromArgb(240, 236, 228) : Color.FromArgb(24, 22, 19);
+            Secondary = Dark ? Color.FromArgb(190, 184, 173) : Color.FromArgb(86, 81, 73);
+            Muted = Dark ? Color.FromArgb(140, 134, 124) : Color.FromArgb(115, 109, 100);
         }
 
         public static GraphicsPath Rounded(RectangleF r, float radius)
@@ -1504,7 +1721,7 @@ namespace KnightSight
         }
     }
 
-    enum Glyph { None, Window, Region, Screen, Start, Stop, Info, Minimise, Close, Pin }
+    enum Glyph { None, Window, Region, Screen, Start, Stop, Info, Minimise, Close, Pin, Mark, Notes, Done, Theme }
 
     // Line icons drawn in the button's ink, so they follow hover, theme and disabled state.
     static class Glyphs
@@ -1570,6 +1787,32 @@ namespace KnightSight
                         }
                         g.DrawLine(pen, b.X + s / 2, b.Y + s * 0.56f, b.X + s / 2, b.Y + s * 0.92f);
                         break;
+                    case Glyph.Mark:
+                        using (var path = new GraphicsPath())
+                        {
+                            path.AddPolygon(new[]
+                            {
+                                new PointF(b.X + s * 0.12f, b.Y + s * 0.88f), new PointF(b.X + s * 0.2f, b.Y + s * 0.62f),
+                                new PointF(b.X + s * 0.64f, b.Y + s * 0.18f), new PointF(b.X + s * 0.82f, b.Y + s * 0.36f),
+                                new PointF(b.X + s * 0.38f, b.Y + s * 0.8f),
+                            });
+                            g.DrawPath(pen, path);
+                        }
+                        g.DrawLine(pen, b.X + s * 0.52f, b.Y + s * 0.3f, b.X + s * 0.7f, b.Y + s * 0.48f);
+                        break;
+                    case Glyph.Notes:
+                        g.DrawLine(pen, b.X + s * 0.14f, b.Y + s * 0.26f, b.X + s * 0.86f, b.Y + s * 0.26f);
+                        g.DrawLine(pen, b.X + s * 0.14f, b.Y + s * 0.5f, b.X + s * 0.86f, b.Y + s * 0.5f);
+                        g.DrawLine(pen, b.X + s * 0.14f, b.Y + s * 0.74f, b.X + s * 0.6f, b.Y + s * 0.74f);
+                        break;
+                    case Glyph.Done:
+                        g.DrawLines(pen, new[] { new PointF(b.X + s * 0.16f, b.Y + s * 0.52f), new PointF(b.X + s * 0.4f, b.Y + s * 0.76f), new PointF(b.X + s * 0.86f, b.Y + s * 0.26f) });
+                        break;
+                    case Glyph.Theme:
+                        var disc = RectangleF.Inflate(b, -s * 0.1f, -s * 0.1f);
+                        g.DrawEllipse(pen, disc);
+                        g.FillPie(brush, disc.X, disc.Y, disc.Width, disc.Height, -90, 180);
+                        break;
                     case Glyph.Close:
                         var state = g.Save();
                         g.TranslateTransform(b.X + s / 2, b.Y + s / 2);
@@ -1585,17 +1828,18 @@ namespace KnightSight
     }
 
     // A rounded button: neutral on the card, the one filled accent button of the view, or a
-    // blank control on the ground whose square lights up under the pointer. Fill, when set,
-    // paints it in a colour of its own, such as the kind of a note.
+    // blank control whose square lights up under the pointer. Fill, when set, paints it in a
+    // colour of its own, such as the kind of a note. Tail is a small chip after the text, for a
+    // key or a count. OnGround sits it on the window's ground instead of a card.
     // Hover fades in and a press sinks it a little, both as transitions over Motion.Control.
     class SoftButton : Control
     {
-        public bool Primary, Blank, Outline;
+        public bool Primary, Blank, Outline, OnGround;
         public Color Fill = Color.Empty;
         public float Square;
-        public Color Under;
         public float Radius;
         public Glyph Icon;
+        public string Tail = "";
         public float K = 1;
         bool hover, down;
         float lit, sink;
@@ -1648,10 +1892,11 @@ namespace KnightSight
         {
             var g = e.Graphics;
             Theme.Prepare(g);
-            g.Clear(Under);
+            var under = OnGround ? Theme.Ground : Theme.Surface;
+            g.Clear(under);
             Color fill, ink;
             float t = Motion.Ease(lit);
-            if (Blank) { fill = Motion.Mix(Under, Theme.Hover, t); ink = Motion.Mix(Theme.Secondary, Theme.Text, t); }
+            if (Blank) { fill = Motion.Mix(under, Theme.Hover, t); ink = Motion.Mix(Theme.Secondary, Theme.Text, t); }
             else if (!Enabled) { fill = Theme.Surface2; ink = Theme.Muted; }
             else if (!Fill.IsEmpty) { fill = Motion.Mix(Fill, Color.White, 0.2f * t); ink = Theme.AccentInk; }
             else if (Outline) { fill = Motion.Mix(Theme.Surface2, Theme.Surface3, t); ink = Theme.Text; }
@@ -1672,28 +1917,83 @@ namespace KnightSight
             float icon = Icon == Glyph.None ? 0 : 16 * K * scale, gap = Text.Length > 0 && icon > 0 ? 8 * K : 0;
             // Typographic, so the padding GDI+ adds around text does not push it off centre.
             using (var format = new StringFormat(StringFormat.GenericTypographic) { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
+            using (var tailFont = new Font(Theme.SemiBold, 12 * K * scale, GraphicsUnit.Pixel))
             {
                 float textWidth = Text.Length > 0 ? g.MeasureString(Text, Font, PointF.Empty, format).Width : 0;
-                float x = r.X + (r.Width - icon - gap - textWidth) / 2;
+                float chip = Tail.Length > 0 ? Math.Max(20 * K * scale, g.MeasureString(Tail, tailFont, PointF.Empty, format).Width + 12 * K * scale) : 0;
+                float chipGap = chip > 0 ? 8 * K : 0;
+                float x = r.X + (r.Width - icon - gap - textWidth - chipGap - chip) / 2;
                 if (icon > 0) Glyphs.Draw(g, Icon, new RectangleF(x, r.Y + (r.Height - icon) / 2, icon, icon), ink, K * scale);
-                if (Text.Length == 0) return;
                 using (var brush = new SolidBrush(ink))
-                    g.DrawString(Text, Font, brush, new RectangleF(x + icon + gap, r.Y, textWidth + 2, r.Height), format);
+                    if (Text.Length > 0) g.DrawString(Text, Font, brush, new RectangleF(x + icon + gap, r.Y, textWidth + 2, r.Height), format);
+                if (chip == 0) return;
+                float tall = 20 * K * scale;
+                var box = new RectangleF(x + icon + gap + textWidth + chipGap, r.Y + (r.Height - tall) / 2, chip, tall);
+                bool filled = Primary || !Fill.IsEmpty;
+                using (var path = Theme.Rounded(box, 4 * K))
+                using (var brush = new SolidBrush(filled ? Color.FromArgb(40, 0, 0, 0) : under))
+                    g.FillPath(brush, path);
+                using (var brush = new SolidBrush(filled ? ink : Theme.Secondary))
+                using (var centred = new StringFormat(format) { Alignment = StringAlignment.Center })
+                    g.DrawString(Tail, tailFont, brush, box, centred);
+            }
+        }
+
+        // The width the content needs with Pad on either side.
+        public int Fit(float pad)
+        {
+            using (var bmp = new Bitmap(1, 1))
+            using (var g = Graphics.FromImage(bmp))
+            using (var format = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap })
+            using (var tailFont = new Font(Theme.SemiBold, 12 * K, GraphicsUnit.Pixel))
+            {
+                float icon = Icon == Glyph.None ? 0 : 16 * K, text = Text.Length > 0 ? g.MeasureString(Text, Font, PointF.Empty, format).Width : 0;
+                float width = icon + (icon > 0 && text > 0 ? 8 * K : 0) + text;
+                // Room for two digits, so a count that grows keeps the bar as it is.
+                if (Tail.Length > 0) width += 8 * K + Math.Max(28 * K, g.MeasureString(Tail, tailFont, PointF.Empty, format).Width + 12 * K);
+                return (int)Math.Ceiling(width + 2 * pad);
             }
         }
     }
 
     enum NoteKind { Bug, Wish, Question }
 
-    // A note has one or more marks, in the order they were made. A pin is a mark without a size.
-    // Marks count in the share's own units from its top left corner, see Spot.
+    // A box in the share's own units from its top left corner, see Spot. A pin is a box without
+    // a size. A mark made on an element carries the element too.
+    class Mark
+    {
+        public readonly RectangleF Box;
+        public readonly Target Element;
+
+        public Mark(RectangleF box, Target element = null)
+        {
+            Box = box;
+            Element = element;
+        }
+
+        public bool Pin { get { return Box.Width == 0 && Box.Height == 0; } }
+
+        public string Own { get { return Element != null ? Element.Own : Pin ? Say.PinSpot : Say.AreaSpot(Box.Size); } }
+
+        // What the note card says about the marks of its note.
+        public static string Describe(IList<Mark> marks)
+        {
+            if (marks.Count == 0) return "";
+            if (marks.Count == 1) return marks[0].Element != null ? marks[0].Element.Shown : marks[0].Own;
+            var own = new List<string>();
+            foreach (var m in marks) own.Add(m.Own);
+            return Say.Spots(marks.Count) + ": " + string.Join(", ", own);
+        }
+    }
+
+    // A note has one or more marks, in the order they were made.
     class Note
     {
         public const int MostMarks = 26;
         public int Number;
         public NoteKind Kind;
         public string Text, Author;
-        public List<RectangleF> Marks = new List<RectangleF>();
+        public List<Mark> Marks = new List<Mark>();
 
         public static readonly string[] Keys = { "bug", "wish", "question" };
 
@@ -1706,14 +2006,14 @@ namespace KnightSight
             return count == 1 ? n : n + (char)('a' + mark);
         }
 
-        public static bool AddMark(List<RectangleF> marks, RectangleF mark)
+        public static bool AddMark(List<Mark> marks, Mark mark)
         {
             if (marks.Count >= MostMarks) return false;
             marks.Add(mark);
             return true;
         }
 
-        public static bool RemoveMark(List<RectangleF> marks, int mark)
+        public static bool RemoveMark(List<Mark> marks, int mark)
         {
             if (marks.Count < 2) return false;
             marks.RemoveAt(mark);
@@ -1784,13 +2084,51 @@ namespace KnightSight
             using (var pen = new Pen(Theme.Accent, 2 * k) { DashStyle = DashStyle.Dash }) g.DrawRectangle(pen, r);
         }
 
-        // Where a click picks a mark: its badge or its box.
-        public static bool Hits(Rectangle r, Point p, float k)
+        // Where a click picks a mark: its badge, or its box too unless that is left free for
+        // marking the elements inside it.
+        public static bool Hits(Rectangle r, Point p, float k, bool box)
         {
             bool pin = r.Width == 0 && r.Height == 0;
             float reach = (pin ? 14 : 13) * k, dx = p.X - r.X, dy = p.Y - r.Y;
             if (dx * dx + dy * dy <= reach * reach) return true;
-            return !pin && Rectangle.Inflate(r, (int)(3 * k), (int)(3 * k)).Contains(p);
+            return box && !pin && Rectangle.Inflate(r, (int)(3 * k), (int)(3 * k)).Contains(p);
+        }
+
+        // The element under the pointer while marking, with a fill quieter than a mark's.
+        public static void Hover(Graphics g, Rectangle r, float k)
+        {
+            using (var fill = new SolidBrush(Color.FromArgb(46, Theme.Accent))) g.FillRectangle(fill, r);
+            using (var halo = new Pen(Color.FromArgb(70, Theme.Accent), 6 * k)) g.DrawRectangle(halo, Rectangle.Inflate(r, (int)(2 * k), (int)(2 * k)));
+            using (var pen = new Pen(Theme.Accent, 2 * k)) g.DrawRectangle(pen, r);
+        }
+
+        // A card with a line or two beside the pointer, such as what is about to be marked.
+        public static void Chip(Graphics g, string first, string second, Rectangle near, Rectangle room, float k)
+        {
+            using (var strong = new Font(Theme.SemiBold, 13 * k, GraphicsUnit.Pixel))
+            using (var quiet = new Font(Theme.Regular, 12 * k, GraphicsUnit.Pixel))
+            using (var format = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap, Trimming = StringTrimming.EllipsisCharacter })
+            {
+                float pad = 10 * k, line = 18 * k, most = Math.Max(120 * k, room.Width - 16 * k);
+                float w = g.MeasureString(first, strong, PointF.Empty, format).Width;
+                if (second.Length > 0) w = Math.Max(w, g.MeasureString(second, quiet, PointF.Empty, format).Width);
+                w = Math.Min(w + 2 * pad + 2, most);
+                float h = (second.Length > 0 ? 2 : 1) * line + 2 * pad - 4 * k;
+                float x = Math.Max(room.Left + 8 * k, Math.Min(near.X, room.Right - 8 * k - w));
+                float y = near.Y - 8 * k - h;
+                if (y < room.Top + 8 * k) y = Math.Min(near.Bottom + 8 * k, room.Bottom - 8 * k - h);
+                var card = new RectangleF(x, y, w, h);
+                using (var path = Theme.Rounded(card, 6 * k))
+                {
+                    using (var brush = new SolidBrush(Theme.Surface)) g.FillPath(brush, path);
+                    using (var edge = new Pen(Theme.Surface3, k)) g.DrawPath(edge, path);
+                }
+                using (var ink = new SolidBrush(Theme.Text))
+                    g.DrawString(first, strong, ink, new RectangleF(x + pad, y + pad - 2 * k, w - 2 * pad, line), format);
+                if (second.Length == 0) return;
+                using (var muted = new SolidBrush(Theme.Secondary))
+                    g.DrawString(second, quiet, muted, new RectangleF(x + pad, y + pad - 2 * k + line, w - 2 * pad, line), format);
+            }
         }
 
         // A label wider than the disc, such as 12b, gets a pill of the same height.
@@ -1857,9 +2195,9 @@ namespace KnightSight
             Open = false;
         }
 
-        public Note Add(IList<RectangleF> marks, NoteKind kind, string text, string author)
+        public Note Add(IList<Mark> marks, NoteKind kind, string text, string author)
         {
-            var note = new Note { Number = next++, Kind = kind, Text = text, Author = author, Marks = new List<RectangleF>(marks) };
+            var note = new Note { Number = next++, Kind = kind, Text = text, Author = author, Marks = new List<Mark>(marks) };
             Notes.Add(note);
             return note;
         }
@@ -1881,7 +2219,7 @@ namespace KnightSight
                     float k = Math.Max(1, (float)scale * density);
                     foreach (var note in Notes)
                         for (int i = 0; i < note.Marks.Count; i++)
-                            Pins.Draw(g, note.Kind, note.Label(i), InPicture(note.Marks[i], density, scale), k, false);
+                            Pins.Draw(g, note.Kind, note.Label(i), InPicture(note.Marks[i].Box, density, scale), k, false);
                 }
                 foreach (var note in Notes) notes.Add(Describe(note, shot, density, scale));
                 var fields = new Dictionary<string, object>
@@ -1913,11 +2251,14 @@ namespace KnightSight
 
         static Dictionary<string, object> Place(Note note, int index, Bitmap shot, float density, double scale)
         {
-            var mark = note.Marks[index];
+            var mark = note.Marks[index].Box;
             var at = InPicture(mark, density, scale);
             var d = new Dictionary<string, object> { { "label", note.Label(index) }, { "x", at.X }, { "y", at.Y } };
             if (mark.Width == 0 && mark.Height == 0) d["pin"] = true;
             else { d["width"] = at.Width; d["height"] = at.Height; }
+            var element = note.Marks[index].Element;
+            if (element != null)
+                d["element"] = new Dictionary<string, object> { { "type", element.Type }, { "name", element.Name }, { "path", element.Path } };
 
             var crop = Spot.Crop(mark, shot.Size, density);
             double fit = Panel.Scale(crop.Size);
@@ -2018,8 +2359,8 @@ namespace KnightSight
     public class Card : Form
     {
         protected int Grip;
-        // DWM's colour for the hairline around the window, or none.
-        protected int Border = unchecked((int)0xFFFFFFFE);
+        // A hairline in the theme's colour around the window.
+        protected bool Edged;
 
         // A card that comes and goes with the pinboard skips the fade, which would otherwise
         // still show in a picture taken right after it hides.
@@ -2057,16 +2398,32 @@ namespace KnightSight
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            int on = Theme.Dark ? 1 : 0, rounded = 2;
-            Native.DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int));
+            Dress();
+            int rounded = 2;
             Native.DwmSetWindowAttribute(Handle, 33, ref rounded, sizeof(int));
-            Native.DwmSetWindowAttribute(Handle, 34, ref Border, sizeof(int));
             int still = Instant ? 1 : 0;
             Native.DwmSetWindowAttribute(Handle, 3, ref still, sizeof(int));
             // A window with no frame of its own gets its shadow back from one row of DWM frame.
             var row = new Native.MARGINS { Bottom = 1 };
             Native.DwmExtendFrameIntoClientArea(Handle, ref row);
         }
+
+        void Dress()
+        {
+            int on = Theme.Dark ? 1 : 0, border = Edged ? ColorRef(Theme.Surface3) : unchecked((int)0xFFFFFFFE);
+            Native.DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int));
+            Native.DwmSetWindowAttribute(Handle, 34, ref border, sizeof(int));
+        }
+
+        // After the theme changed, so a window already open follows it.
+        public void Restyle()
+        {
+            if (IsHandleCreated) Dress();
+            Recolor();
+            Invalidate(true);
+        }
+
+        protected virtual void Recolor() { BackColor = Theme.Surface; }
     }
 
     // A text box on the ground colour that shows its hint while it is empty.
@@ -2105,7 +2462,7 @@ namespace KnightSight
         readonly Field text, author;
         readonly Font titleFont, hintFont;
         readonly Rectangle textField, authorField;
-        string title = "", before = "";
+        string title = "", before = "", where = "";
         public Note Note { get; private set; }
         public NoteKind Kind { get; private set; }
         public Action Saved, Deleted, Dismissed, KindChanged, Typed;
@@ -2118,16 +2475,15 @@ namespace KnightSight
             StartPosition = FormStartPosition.Manual;
             BackColor = Theme.Surface;
             DoubleBuffered = true;
-            Border = ColorRef(Theme.Surface3);
+            Edged = true;
             Instant = true;
             titleFont = new Font(Theme.SemiBold, 15 * k, GraphicsUnit.Pixel);
             hintFont = new Font(Theme.Regular, 13 * k, GraphicsUnit.Pixel);
             var buttonFont = new Font(Theme.SemiBold, 14 * k, GraphicsUnit.Pixel);
             int w = S(340), pad = S(16);
-            Size = new Size(w, S(336));
+            Size = new Size(w, S(360));
             Grip = S(44);
 
-            close.Under = Theme.Surface;
             close.Radius = S(6);
             close.K = k;
             close.Square = S(28);
@@ -2138,23 +2494,23 @@ namespace KnightSight
             for (int i = 0; i < 3; i++)
             {
                 var kind = (NoteKind)i;
-                kinds[i] = Button(new SoftButton(), Say.Kinds[i], buttonFont, new Rectangle(pad + i * (kindWidth + S(8)), S(52), kindWidth, S(32)));
+                kinds[i] = Button(new SoftButton(), Say.Kinds[i], buttonFont, new Rectangle(pad + i * (kindWidth + S(8)), S(76), kindWidth, S(32)));
                 kinds[i].Click += (o, e) => Choose(kind);
             }
 
-            textField = new Rectangle(pad, S(96), w - 2 * pad, S(100));
+            textField = new Rectangle(pad, S(120), w - 2 * pad, S(100));
             text = new Field(k, true) { Hint = Say.NotePlaceholder, Bounds = Rectangle.Inflate(textField, -S(10), -S(8)) };
             text.TextChanged += (o, e) =>
             {
                 save.Enabled = text.Text.Trim().Length > 0;
                 if (Typed != null) Typed();
             };
-            authorField = new Rectangle(pad, S(208), w - 2 * pad, S(36));
+            authorField = new Rectangle(pad, S(232), w - 2 * pad, S(36));
             author = new Field(k, false) { Hint = Say.AuthorPlaceholder };
             author.Bounds = new Rectangle(authorField.X + S(10), authorField.Y + (authorField.Height - author.PreferredHeight) / 2, authorField.Width - S(20), author.PreferredHeight);
 
-            Button(delete, Say.Delete, buttonFont, new Rectangle(pad, S(284), S(104), S(36))).Click += (o, e) => Deleted();
-            Button(save, Say.Save, buttonFont, new Rectangle(w - pad - S(120), S(284), S(120), S(36))).Click += (o, e) => Saved();
+            Button(delete, Say.Delete, buttonFont, new Rectangle(pad, S(308), S(104), S(36))).Click += (o, e) => Deleted();
+            Button(save, Say.Save, buttonFont, new Rectangle(w - pad - S(120), S(308), S(120), S(36))).Click += (o, e) => Saved();
             Controls.AddRange(new Control[] { close, kinds[0], kinds[1], kinds[2], text, author, delete, save });
         }
 
@@ -2164,7 +2520,6 @@ namespace KnightSight
         {
             b.Text = label;
             b.Font = font;
-            b.Under = Theme.Surface;
             b.Radius = S(6);
             b.K = k;
             b.Bounds = bounds;
@@ -2172,6 +2527,27 @@ namespace KnightSight
         }
 
         protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override void Recolor()
+        {
+            base.Recolor();
+            foreach (var field in new[] { text, author })
+            {
+                field.BackColor = Theme.Ground;
+                field.ForeColor = Theme.Text;
+            }
+        }
+
+        // The line under the title that says where the marks of the note sit.
+        public string Where
+        {
+            set
+            {
+                if (where == value) return;
+                where = value;
+                Invalidate();
+            }
+        }
 
         public string NoteText { get { return text.Text.Trim(); } }
         public string Author { get { return author.Text.Trim(); } }
@@ -2241,6 +2617,9 @@ namespace KnightSight
             using (var ink = new SolidBrush(Theme.Text))
             using (var format = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
                 g.DrawString(title, titleFont, ink, new RectangleF(S(16), S(6), close.Left - S(24), S(36)), format);
+            using (var secondary = new SolidBrush(Theme.Secondary))
+            using (var format = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+                g.DrawString(where, hintFont, secondary, new RectangleF(S(16), S(42), Width - S(32), S(24)), format);
             using (var ground = new SolidBrush(Theme.Ground))
                 foreach (var field in new[] { textField, authorField })
                     using (var path = Theme.Rounded(field, S(6))) g.FillPath(ground, path);
@@ -2340,14 +2719,16 @@ namespace KnightSight
                     }
                     Pins.Badge(g, note.Number.ToString(CultureInfo.InvariantCulture), new PointF(30 * k, y + Row / 2), 22 * k, Pins.Of(note.Kind), i == hover ? Theme.Hover : Theme.Surface, k, false);
                     float x = 52 * k;
-                    var kind = Say.Kinds[(int)note.Kind] + (note.Marks.Count > 1 ? ", " + Say.Spots(note.Marks.Count) : "");
+                    var element = note.Marks.Find(m => m.Element != null);
+                    var kind = Say.Kinds[(int)note.Kind] + (note.Marks.Count > 1 ? ", " + Say.Spots(note.Marks.Count) : "") + (element != null ? ", " + element.Own : "");
                     g.DrawString(kind, kindFont, muted, new RectangleF(x, y + 5 * k, end - x, 18 * k), oneLine);
                     g.DrawString(note.Text.Replace("\r", "").Replace('\n', ' '), textFont, ink, new RectangleF(x, y + 22 * k, end - x, 22 * k), oneLine);
                 }
         }
     }
 
-    // The list of all notes on the pinboard, with Save as file and Done.
+    // The list of all notes on the pinboard, with Save as file and Done. Its keys go to the
+    // pinboard, as the overlay's do.
     class NoteList : Card
     {
         const int MaxRows = 6;
@@ -2357,6 +2738,7 @@ namespace KnightSight
         readonly Font titleFont, countFont;
         int count;
         public Action Done, SaveFile, Dismissed;
+        public Func<Keys, bool> Pressed;
         public Action<Note> Picked { set { rows.Picked = value; } }
 
         public NoteList(float k)
@@ -2367,8 +2749,9 @@ namespace KnightSight
             StartPosition = FormStartPosition.Manual;
             BackColor = Theme.Surface;
             DoubleBuffered = true;
-            Border = ColorRef(Theme.Surface3);
+            Edged = true;
             Instant = true;
+            KeyPreview = true;
             titleFont = new Font(Theme.SemiBold, 15 * k, GraphicsUnit.Pixel);
             countFont = new Font(Theme.Regular, 14 * k, GraphicsUnit.Pixel);
             var buttonFont = new Font(Theme.SemiBold, 14 * k, GraphicsUnit.Pixel);
@@ -2376,17 +2759,15 @@ namespace KnightSight
             Grip = S(44);
             rows = new NoteRows(k) { Bounds = new Rectangle(0, S(48), w, S(56)) };
 
-            close.Under = Theme.Surface;
             close.Radius = S(6);
             close.K = k;
             close.Square = S(28);
             close.Bounds = new Rectangle(w - S(8) - S(36), S(6), S(36), S(36));
             close.Click += (o, e) => Dismissed();
-            new ToolTip().SetToolTip(close, Say.ClosePinboard);
+            new ToolTip().SetToolTip(close, Say.CloseList);
             foreach (var b in new[] { saveFile, done })
             {
                 b.Font = buttonFont;
-                b.Under = Theme.Surface;
                 b.Radius = S(6);
                 b.K = k;
             }
@@ -2402,6 +2783,12 @@ namespace KnightSight
         int S(float v) { return (int)Math.Round(v * k); }
 
         protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (Pressed(e.KeyData)) e.Handled = true;
+            base.OnKeyDown(e);
+        }
 
         public void Fill(List<Note> notes)
         {
@@ -2434,18 +2821,140 @@ namespace KnightSight
             using (var muted = new SolidBrush(Theme.Muted))
             using (var format = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
             {
-                g.DrawString(Say.Pinboard, titleFont, ink, head, format);
+                g.DrawString(Say.Notes, titleFont, ink, head, format);
                 if (count == 0) return;
-                float x = head.X + g.MeasureString(Say.Pinboard, titleFont).Width + S(2);
+                float x = head.X + g.MeasureString(Say.Notes, titleFont).Width + S(2);
                 g.DrawString(count.ToString(CultureInfo.CurrentCulture), countFont, muted, new RectangleF(x, head.Y + S(1), head.Right - x, head.Height), format);
             }
         }
     }
 
+    enum Tool { Mark, Pin, Area }
+
+    // The bar over the share with the pinboard's tools, the notes and Done, after the bar of the
+    // web pinboard. Everything on it but the buttons is a handle to drag it by.
+    class Toolbar : Card
+    {
+        readonly float k;
+        readonly SoftButton mark = new SoftButton { Icon = Glyph.Mark, Tail = "N" }, pin = new SoftButton { Icon = Glyph.Pin, Tail = "P" },
+            area = new SoftButton { Icon = Glyph.Region, Tail = "B" }, notes = new SoftButton { Icon = Glyph.Notes, Tail = "0" },
+            done = new SoftButton { Icon = Glyph.Done }, theme = new SoftButton { Blank = true, Icon = Glyph.Theme },
+            close = new SoftButton { Blank = true, Icon = Glyph.Close };
+        readonly ToolTip tip = new ToolTip();
+        readonly Font gripFont;
+        readonly string label = Say.Pinboard.ToUpper(CultureInfo.CurrentCulture);
+        public Action<Tool> Chosen;
+        public Action ListToggled, Done, Rethemed, Dismissed;
+        public Func<Keys, bool> Pressed;
+        public Tool Tool { get; private set; }
+        public int Count { get; private set; }
+
+        public Toolbar(float k)
+        {
+            this.k = k;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Surface;
+            DoubleBuffered = true;
+            Edged = true;
+            Instant = true;
+            gripFont = new Font(Theme.SemiBold, 12 * k, GraphicsUnit.Pixel);
+            var buttonFont = new Font(Theme.SemiBold, 14 * k, GraphicsUnit.Pixel);
+            int x = LabelLeft + (int)Math.Ceiling(Spaced(null, 0, 0)) + S(14);
+            x = Put(mark, Say.MarkTool, Say.MarkTip, buttonFont, x);
+            x = Put(pin, Say.PinTool, Say.PinTip, buttonFont, x);
+            x = Put(area, Say.AreaTool, Say.AreaTip, buttonFont, x);
+            x = Put(notes, Say.Notes, Say.NotesTip, buttonFont, x);
+            x = Put(done, Say.Done, Say.DoneTip, buttonFont, x);
+            x = Put(theme, "", Say.ThemeTip, buttonFont, x);
+            x = Put(close, "", Say.ClosePinboard, buttonFont, x);
+            Size = new Size(x, S(56));
+            Grip = Height;
+            mark.Click += (o, e) => Chosen(Tool.Mark);
+            pin.Click += (o, e) => Chosen(Tool.Pin);
+            area.Click += (o, e) => Chosen(Tool.Area);
+            notes.Click += (o, e) => ListToggled();
+            done.Click += (o, e) => Done();
+            theme.Click += (o, e) => Rethemed();
+            close.Click += (o, e) => Dismissed();
+        }
+
+        int S(float v) { return (int)Math.Round(v * k); }
+
+        int LabelLeft { get { return S(32); } }
+
+        int Put(SoftButton b, string text, string hint, Font font, int x)
+        {
+            b.Text = text;
+            b.Font = font;
+            b.Radius = S(6);
+            b.K = k;
+            b.Square = S(32);
+            int width = b.Blank ? S(40) : b.Fit(S(14));
+            b.Bounds = new Rectangle(x, S(8), width, S(40));
+            tip.SetToolTip(b, hint);
+            Controls.Add(b);
+            return x + width + S(8);
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            return Pressed(keyData) || base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        public void Reflect(Tool tool, int count, bool listOpen, bool canSend)
+        {
+            Tool = tool;
+            Count = count;
+            mark.Primary = tool == Tool.Mark;
+            pin.Primary = tool == Tool.Pin;
+            area.Primary = tool == Tool.Area;
+            notes.Tail = count.ToString(CultureInfo.CurrentCulture);
+            notes.Outline = listOpen;
+            done.Enabled = canSend;
+            foreach (Control c in Controls) c.Invalidate();
+        }
+
+        // The name in capitals with some air between the letters, which GDI+ has no setting for.
+        // Without a Graphics it only measures.
+        float Spaced(Graphics g, float x, float y)
+        {
+            float start = x;
+            using (var format = new StringFormat(StringFormat.GenericTypographic))
+            using (var bmp = new Bitmap(1, 1))
+            using (var measure = Graphics.FromImage(bmp))
+            using (var ink = new SolidBrush(Theme.Muted))
+                foreach (char c in label)
+                {
+                    var letter = c.ToString();
+                    if (g != null) g.DrawString(letter, gripFont, ink, x, y, format);
+                    x += measure.MeasureString(letter, gripFont, PointF.Empty, format).Width + 1.7f * k;
+                }
+            return x - start;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            Theme.Prepare(g);
+            float d = 3 * k, top = Height / 2f - 9 * k;
+            using (var dot = new SolidBrush(Theme.Surface3))
+                for (int row = 0; row < 4; row++)
+                    for (int col = 0; col < 2; col++)
+                        g.FillEllipse(dot, 14 * k + col * 5 * k, top + row * 5 * k, d, d);
+            Spaced(g, LabelLeft, Height / 2f - gripFont.GetHeight(g) / 2);
+        }
+    }
+
     // The see-through layer over the share while the pinboard is open. It takes the clicks that
-    // would otherwise reach the shared window.
+    // would otherwise reach the shared window, and while it has the focus the pinboard's keys.
     class Overlay : Form
     {
+        public Func<Keys, bool> Pressed;
+
         public Overlay()
         {
             FormBorderStyle = FormBorderStyle.None;
@@ -2467,6 +2976,11 @@ namespace KnightSight
             }
         }
 
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            return Pressed(keyData) || base.ProcessCmdKey(ref msg, keyData);
+        }
+
         public void Push(Bitmap bmp, Point at)
         {
             if (!Visible) Show();
@@ -2474,32 +2988,42 @@ namespace KnightSight
         }
     }
 
-    // The pinboard over one share: the overlay that takes the marks, the card for a note and the
-    // list of them all. The panel calls Follow on every tick while it is open.
+    // The pinboard over one share: the overlay that takes the marks, the bar with the tools, the
+    // card for a note and the list of them all. The panel calls Follow on every tick while it is open.
     class Pinboard
     {
         const float DragStart = 6, Gap = 12;
-        const string Settings = @"HKEY_CURRENT_USER\Software\KnightSight";
-        static readonly TimeSpan FlashSpan = TimeSpan.FromMilliseconds(900);
+        static readonly TimeSpan FlashSpan = TimeSpan.FromMilliseconds(900), PartsAge = TimeSpan.FromSeconds(2);
 
         readonly Board board;
         readonly float k;
         readonly Overlay overlay = new Overlay();
+        readonly Toolbar bar;
         readonly NoteEditor editor;
         readonly NoteList list;
         Rectangle area, editorAnchor;
         float density = 1;
         Bitmap picture;
-        bool dirty = true, editing, listMoved, placing;
-        Point listOffset;
+        bool dirty = true, editing, listOpen, listMoved, barMoved, placing, fresh = true;
+        Point listOffset, barOffset;
         Point? down;
         Rectangle draft;
         // The marks of the note in the editor, which Shift adds to and takes from before it is saved.
-        List<RectangleF> marks = new List<RectangleF>();
+        List<Mark> marks = new List<Mark>();
         bool marksChanged, adding;
         Note hover, flash;
         DateTime flashStart;
-        public Action Finish, SaveFile, Closed;
+        Tool tool = Tool.Mark;
+        // The elements of the shared window as last read, the smallest one under the pointer, and
+        // the one a click marks, which the wheel and the arrow keys move out from it and back.
+        List<Part> parts;
+        DateTime partsRead;
+        bool reading;
+        int hit = -1, part = -1;
+        Point pointer;
+        public Action Finish, SaveFile, Closed, Restyled;
+        // The windows whose elements can be marked, topmost first, or null for none.
+        public Func<List<IntPtr>> Readable;
 
         public Pinboard(Board board, float k)
         {
@@ -2507,68 +3031,96 @@ namespace KnightSight
             this.k = k;
             editor = new NoteEditor(k) { Owner = overlay };
             list = new NoteList(k) { Owner = overlay };
+            bar = new Toolbar(k) { Owner = overlay };
             editor.Saved = Save;
             editor.Deleted = Delete;
             editor.Dismissed = CloseNote;
             editor.KindChanged = () => { if (editing) Render(); };
-            editor.Typed = () => list.Allow(board.Notes.Count > 0 || (editing && editor.CanSave));
-            list.Done = () => { KeepOpenNote(); Finish(); };
+            editor.Typed = Sync;
+            list.Done = bar.Done = () => { KeepOpenNote(); Finish(); };
             list.SaveFile = () => { KeepOpenNote(); SaveFile(); };
-            list.Dismissed = () => Closed();
+            list.Dismissed = () => ShowList(false);
             list.Picked = GoTo;
+            list.Pressed = bar.Pressed = overlay.Pressed = Key;
             list.LocationChanged += (o, e) =>
             {
                 if (placing || !list.Visible) return;
                 listMoved = true;
                 listOffset = new Point(list.Left - area.X, list.Top - area.Y);
             };
+            bar.LocationChanged += (o, e) =>
+            {
+                if (placing || !bar.Visible) return;
+                barMoved = true;
+                barOffset = new Point(bar.Left - area.X, bar.Top - area.Y);
+            };
+            bar.Chosen = Choose;
+            bar.ListToggled = () => ShowList(!listOpen);
+            bar.Rethemed = () =>
+            {
+                Restyled();
+                if (!area.IsEmpty) Render();
+            };
+            bar.Dismissed = () => Closed();
             overlay.MouseDown += (o, e) => Pressed(e);
             overlay.MouseMove += (o, e) => Moved(e);
             overlay.MouseUp += (o, e) => Released(e);
-            overlay.KeyDown += (o, e) =>
-            {
-                if (e.KeyCode != Keys.Escape) return;
-                if (editing) CloseNote();
-                else Closed();
-            };
+            overlay.MouseWheel += (o, e) => Climb(e.Delta > 0);
+            Sync();
         }
 
         public IWin32Window Window { get { return list; } }
 
         // Bottom first, as the panel stacks them above the share.
-        public IEnumerable<Form> Windows { get { return new Form[] { overlay, list, editor }; } }
+        public IEnumerable<Form> Windows { get { return new Form[] { overlay, list, bar, editor }; } }
 
-        public IEnumerable<Form> Cards { get { return new Form[] { list, editor }; } }
+        public IEnumerable<Card> Cards { get { return new Card[] { list, bar, editor }; } }
+
+        public Toolbar Bar { get { return bar; } }
 
         static string Author
         {
-            get { return Microsoft.Win32.Registry.GetValue(Settings, "Author", "") as string ?? ""; }
-            set { Microsoft.Win32.Registry.SetValue(Settings, "Author", value); }
+            get { return Saved.Get("Author"); }
+            set { Saved.Set("Author", value); }
         }
 
         Rectangle OnScreen(RectangleF mark) { return Spot.ToScreen(mark, area, density); }
 
-        IList<RectangleF> MarksOf(Note note) { return editing && editor.Note == note ? marks : note.Marks; }
+        IList<Mark> MarksOf(Note note) { return editing && editor.Note == note ? marks : note.Marks; }
 
-        int MarkAt(IList<RectangleF> those, Point screen)
+        int MarkAt(IList<Mark> those, Point screen, bool boxes)
         {
             for (int m = those.Count - 1; m >= 0; m--)
-                if (Spot.Shows(those[m], area, density) && Pins.Hits(OnScreen(those[m]), screen, k)) return m;
+                if (Spot.Shows(those[m].Box, area, density) && Pins.Hits(OnScreen(those[m].Box), screen, k, boxes)) return m;
             return -1;
         }
 
+        // While marking elements only a badge opens its note, so the elements inside a box stay free.
         Note NoteAt(Point screen)
         {
             for (int i = board.Notes.Count - 1; i >= 0; i--)
-                if (MarkAt(MarksOf(board.Notes[i]), screen) >= 0) return board.Notes[i];
+                if (MarkAt(MarksOf(board.Notes[i]), screen, tool != Tool.Mark) >= 0) return board.Notes[i];
             return null;
         }
+
+        // A window that gives UI Automation nothing to mark, such as a game or a remote desktop,
+        // is marked with a box instead.
+        bool Bare { get { return tool == Tool.Mark && parts != null && !parts.Exists(p => p.Parent >= 0); } }
+
+        bool Drags { get { return tool == Tool.Area || Bare; } }
 
         public void Follow(Rectangle bounds, float scale)
         {
             if (bounds.Width <= 0 || bounds.Height <= 0) { Conceal(); return; }
             bool moved = bounds != area;
             if (bounds.Size != area.Size || scale != density) dirty = true;
+            // The elements are read in screen pixels, so a window that moved has left them behind.
+            if (moved && parts != null)
+            {
+                parts = null;
+                hit = part = -1;
+                dirty = true;
+            }
             area = bounds;
             density = scale;
             if (flash != null)
@@ -2578,8 +3130,16 @@ namespace KnightSight
             }
             if (dirty) Render();
             else if (moved || !overlay.Visible) overlay.Push(picture, area.Location);
-            PlaceList();
+            if (tool == Tool.Mark && parts == null && !reading) ReadParts();
+            PlaceBar();
+            if (listOpen) PlaceList();
             if (editing) PlaceEditor();
+            // The shared window came to the front for the pinboard, and N, P and B belong to the bar.
+            if (fresh)
+            {
+                fresh = false;
+                Win.Activate(bar.Handle);
+            }
         }
 
         // Out of sight for a moment, for a picture taken off the screen. The next Follow brings it back.
@@ -2596,6 +3156,115 @@ namespace KnightSight
             down = null;
             draft = Rectangle.Empty;
             hover = flash = null;
+            parts = null;
+            hit = part = -1;
+            fresh = true;
+        }
+
+        // The pinboard's keys wherever its focus is: N, P and B pick the tool, the arrows walk from
+        // an element out to the one around it and back.
+        public bool Key(Keys key)
+        {
+            switch (key)
+            {
+                case Keys.N: Choose(Tool.Mark); return true;
+                case Keys.P: Choose(Tool.Pin); return true;
+                case Keys.B: Choose(Tool.Area); return true;
+                case Keys.Up: return Climb(true);
+                case Keys.Down: return Climb(false);
+                case Keys.Escape:
+                    if (editing) CloseNote();
+                    else Closed();
+                    return true;
+                default: return false;
+            }
+        }
+
+        void Choose(Tool chosen)
+        {
+            tool = chosen;
+            hit = part = -1;
+            down = null;
+            draft = Rectangle.Empty;
+            Sync();
+            if (area.IsEmpty) return;
+            Aim(pointer);
+            Render();
+        }
+
+        bool Climb(bool up)
+        {
+            if (tool != Tool.Mark || part < 0) return false;
+            int next = up ? ControlTree.Up(parts, part) : ControlTree.Down(parts, hit, part);
+            if (next >= 0 && next != part)
+            {
+                part = next;
+                Render();
+            }
+            return true;
+        }
+
+        void ShowList(bool open)
+        {
+            listOpen = open;
+            if (!open) list.Hide();
+            else if (!area.IsEmpty) PlaceList();
+            Sync();
+        }
+
+        void Sync()
+        {
+            bool send = board.Notes.Count > 0 || editing && editor.CanSave;
+            list.Allow(send);
+            bar.Reflect(tool, board.Notes.Count, listOpen, send);
+        }
+
+        // Off the panel's thread, since another program may take its time to answer.
+        void ReadParts()
+        {
+            var windows = Readable == null ? null : Readable();
+            var at = area;
+            if (windows == null)
+            {
+                Took(new List<Part>(), at);
+                return;
+            }
+            reading = true;
+            new Thread(() =>
+            {
+                var found = ControlTree.Parts(windows) ?? new List<Part>();
+                // The overlay is gone when KnightSight closes in the middle of a walk.
+                try { overlay.BeginInvoke((MethodInvoker)(() => Took(found, at))); }
+                catch (InvalidOperationException) { }
+            }) { IsBackground = true }.Start();
+        }
+
+        // A reading taken before the share moved is off by the move, so it is taken again.
+        void Took(List<Part> found, Rectangle at)
+        {
+            reading = false;
+            if (area.IsEmpty) return;
+            if (at != area)
+            {
+                ReadParts();
+                return;
+            }
+            parts = found;
+            partsRead = DateTime.UtcNow;
+            hit = part = tool == Tool.Mark && area.Contains(pointer) ? ControlTree.At(parts, pointer) : -1;
+            Render();
+        }
+
+        // The element under the pointer while marking. A reading that has aged is renewed, since
+        // the window may have changed under the pinboard.
+        void Aim(Point p)
+        {
+            if (tool != Tool.Mark) return;
+            if (!reading && (parts == null || DateTime.UtcNow - partsRead > PartsAge)) ReadParts();
+            int under = parts != null && area.Contains(p) ? ControlTree.At(parts, p) : -1;
+            if (under == hit) return;
+            hit = part = under;
+            Render();
         }
 
         void Render()
@@ -2615,16 +3284,24 @@ namespace KnightSight
                     if (!editing || editor.Note != note) DrawMarks(g, note.Kind, note.Number, note.Marks, note == hover || note == flash, note == flash);
                 if (editing) DrawMarks(g, editor.Kind, editor.Note != null ? editor.Note.Number : board.Next, marks, true, editor.Note != null && editor.Note == flash);
                 if (!draft.IsEmpty) Pins.Draft(g, draft, k);
+                if (tool == Tool.Mark && part >= 0 && !down.HasValue)
+                {
+                    var r = Rectangle.Intersect(parts[part].Box, area);
+                    Pins.Hover(g, r, k);
+                    Pins.Chip(g, ControlTree.Shown(parts[part]), ControlTree.Up(parts, part) >= 0 ? Say.WalkUp : "", r, area, k);
+                }
+                else if (Bare && draft.IsEmpty)
+                    Pins.Chip(g, Say.NoParts, "", new Rectangle(area.X + (int)(16 * k), area.Y, 0, 0), area, k);
             }
             overlay.Push(picture, area.Location);
         }
 
-        void DrawMarks(Graphics g, NoteKind kind, int number, IList<RectangleF> those, bool lit, bool flashing)
+        void DrawMarks(Graphics g, NoteKind kind, int number, IList<Mark> those, bool lit, bool flashing)
         {
             for (int i = 0; i < those.Count; i++)
             {
-                if (!Spot.Shows(those[i], area, density)) continue;
-                var r = OnScreen(those[i]);
+                if (!Spot.Shows(those[i].Box, area, density)) continue;
+                var r = OnScreen(those[i].Box);
                 if (flashing) Halo(g, kind, r);
                 Pins.Draw(g, kind, Note.Label(number, i, those.Count), r, k, lit);
             }
@@ -2643,12 +3320,34 @@ namespace KnightSight
             }
         }
 
+        // Bottom centre inside the share, or under it when the share is too low to leave room
+        // above the bar. Once dragged it keeps its place on the share.
+        void PlaceBar()
+        {
+            if (!bar.Visible) bar.Show();
+            var size = bar.Size;
+            var work = Screen.FromRectangle(area).WorkingArea;
+            int gap = (int)(16 * k);
+            Point at;
+            if (barMoved) at = new Point(area.X + barOffset.X, area.Y + barOffset.Y);
+            else
+            {
+                at = new Point(area.X + (area.Width - size.Width) / 2, area.Bottom - gap - size.Height);
+                if (area.Height < 3 * size.Height) at.Y = area.Bottom + gap;
+            }
+            at.X = Math.Max(work.Left, Math.Min(at.X, work.Right - size.Width));
+            at.Y = Math.Max(work.Top, Math.Min(at.Y, work.Bottom - size.Height));
+            if (bar.Location == at) return;
+            placing = true;
+            bar.Location = at;
+            placing = false;
+        }
+
         void PlaceList()
         {
             if (!list.Visible)
             {
                 list.Fill(board.Notes);
-                list.Allow(board.Notes.Count > 0);
                 list.Show();
             }
             var size = list.Size;
@@ -2670,7 +3369,7 @@ namespace KnightSight
         // placed it stays where the person drags it until the mark moves.
         void PlaceEditor()
         {
-            var r = OnScreen(marks[0]);
+            var r = OnScreen(marks[0].Box);
             if (!editor.Visible) editor.Show();
             if (r == editorAnchor) return;
             editorAnchor = r;
@@ -2696,7 +3395,7 @@ namespace KnightSight
             adding = editing && (Control.ModifierKeys & Keys.Shift) != 0;
             if (adding)
             {
-                int own = MarkAt(marks, p);
+                int own = MarkAt(marks, p, true);
                 if (own < 0)
                 {
                     down = p;
@@ -2705,6 +3404,7 @@ namespace KnightSight
                 if (Note.RemoveMark(marks, own)) marksChanged = true;
                 else System.Media.SystemSounds.Beep.Play();
                 editorAnchor = Rectangle.Empty;
+                editor.Where = Mark.Describe(marks);
                 Render();
                 editor.Begin(false);
                 return;
@@ -2714,16 +3414,18 @@ namespace KnightSight
                 editor.Begin(false);
                 return;
             }
-            var hit = NoteAt(p);
-            if (hit != null) Open(hit);
+            var at = NoteAt(p);
+            if (at != null) Open(at);
             else down = p;
         }
 
         void Moved(MouseEventArgs e)
         {
             var p = new Point(area.X + e.X, area.Y + e.Y);
+            pointer = p;
             if (down.HasValue)
             {
+                if (!Drags) return;
                 var d = down.Value;
                 if (draft.IsEmpty && Math.Abs(p.X - d.X) < DragStart * k && Math.Abs(p.Y - d.Y) < DragStart * k) return;
                 p.X = Math.Max(area.Left, Math.Min(p.X, area.Right - 1));
@@ -2732,6 +3434,7 @@ namespace KnightSight
                 Render();
                 return;
             }
+            Aim(p);
             var over = NoteAt(p);
             overlay.Cursor = over != null ? Cursors.Hand : Cursors.Cross;
             if (over == hover) return;
@@ -2742,29 +3445,48 @@ namespace KnightSight
         void Released(MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left || !down.HasValue) return;
-            var start = Spot.ToShare(down.Value, area, density);
-            var mark = draft.IsEmpty
-                ? new RectangleF(start, SizeF.Empty)
-                : new RectangleF(Spot.ToShare(draft.Location, area, density), new SizeF(draft.Width / density, draft.Height / density));
+            var start = down.Value;
+            var box = draft;
             down = null;
             draft = Rectangle.Empty;
+            var mark = box.IsEmpty ? Click(start) : new Mark(InShare(box));
+            if (mark == null)
+            {
+                Render();
+                return;
+            }
             if (adding)
             {
                 if (Note.AddMark(marks, mark)) marksChanged = true;
                 else System.Media.SystemSounds.Beep.Play();
+                editor.Where = Mark.Describe(marks);
                 Render();
                 editor.Begin(false);
                 return;
             }
-            marks = new List<RectangleF> { mark };
+            marks = new List<Mark> { mark };
             marksChanged = false;
             editor.Open(null, Author);
             Opened();
         }
 
+        RectangleF InShare(Rectangle screen)
+        {
+            return new RectangleF(Spot.ToShare(screen.Location, area, density), new SizeF(screen.Width / density, screen.Height / density));
+        }
+
+        // What a click without a drag makes with the tool at hand: a pin, the element it points
+        // at, or nothing for an area, which wants a drag.
+        Mark Click(Point at)
+        {
+            if (tool == Tool.Pin) return new Mark(new RectangleF(Spot.ToShare(at, area, density), SizeF.Empty));
+            if (tool != Tool.Mark || part < 0) return null;
+            return new Mark(InShare(Rectangle.Intersect(parts[part].Box, area)), ControlTree.Describe(parts, part));
+        }
+
         void Open(Note note)
         {
-            marks = new List<RectangleF>(note.Marks);
+            marks = new List<Mark>(note.Marks);
             marksChanged = false;
             editor.Open(note, Author);
             Opened();
@@ -2774,8 +3496,10 @@ namespace KnightSight
         {
             editing = true;
             editorAnchor = Rectangle.Empty;
+            editor.Where = Mark.Describe(marks);
             PlaceEditor();
             editor.Begin(editor.Note != null);
+            Sync();
             Render();
         }
 
@@ -2783,7 +3507,7 @@ namespace KnightSight
         {
             flash = note;
             flashStart = DateTime.UtcNow;
-            if (note.Marks.Exists(m => Spot.Shows(m, area, density))) Open(note);
+            if (note.Marks.Exists(m => Spot.Shows(m.Box, area, density))) Open(note);
             Render();
         }
 
@@ -2793,7 +3517,7 @@ namespace KnightSight
             if (editor.Note == null) board.Add(marks, editor.Kind, editor.NoteText, editor.Author);
             else
             {
-                editor.Note.Marks = new List<RectangleF>(marks);
+                editor.Note.Marks = new List<Mark>(marks);
                 editor.Note.Kind = editor.Kind;
                 editor.Note.Text = editor.NoteText;
                 editor.Note.Author = editor.Author;
@@ -2815,11 +3539,11 @@ namespace KnightSight
         void CloseNote()
         {
             editing = false;
-            marks = new List<RectangleF>();
+            marks = new List<Mark>();
             marksChanged = false;
             editor.Hide();
             list.Fill(board.Notes);
-            list.Allow(board.Notes.Count > 0);
+            Sync();
             Render();
         }
     }
@@ -2946,7 +3670,18 @@ namespace KnightSight
             close.Click += (o, e) => Close();
             pin.Click += (o, e) => TogglePinboard();
             Controls.AddRange(new Control[] { pickWindow, pickRegion, pickScreen, pin, toggle, info, minimise, close });
-            pinboard = new Pinboard(board, k) { Finish = FinishPinboard, SaveFile = SavePinboard, Closed = ClosePinboard };
+            pinboard = new Pinboard(board, k) { Finish = FinishPinboard, SaveFile = SavePinboard, Closed = ClosePinboard, Restyled = SwitchTheme };
+            // Readable lists the share's own window first, the pinboard wants its menus on top.
+            pinboard.Readable = () =>
+            {
+                var windows = Readable(chosen);
+                if (windows != null)
+                {
+                    windows.Add(windows[0]);
+                    windows.RemoveAt(0);
+                }
+                return windows;
+            };
 
             hotkeys = new Hotkeys(id => { if (id == 1) Stop(); else TogglePinboard(); });
             hotkeys.Register(1, Hotkeys.Control | Hotkeys.Alt | Hotkeys.Shift, Keys.X);
@@ -2964,7 +3699,6 @@ namespace KnightSight
         {
             b.Text = text;
             b.Font = font;
-            b.Under = Theme.Surface;
             b.Radius = S(10);
             b.K = k;
             b.Bounds = Rectangle.Round(new RectangleF(x, y, w, h));
@@ -2972,12 +3706,22 @@ namespace KnightSight
 
         void PlaceOnBar(SoftButton b, string name, float x)
         {
-            b.Under = Theme.Ground;
+            b.OnGround = true;
             b.Radius = S(6);
             b.K = k;
             b.Square = S(28);
             b.Bounds = Rectangle.Round(new RectangleF(S(x), 0, S(42), S(BarHeight)));
             tip.SetToolTip(b, name);
+        }
+
+        protected override void Recolor() { BackColor = Theme.Ground; }
+
+        void SwitchTheme()
+        {
+            Theme.Use(!Theme.Dark);
+            Saved.Set("Theme", Theme.Dark ? "dark" : "light");
+            Restyle();
+            foreach (var card in pinboard.Cards) card.Restyle();
         }
 
         // The minimise box lets Windows play its animation.
@@ -3669,12 +4413,16 @@ namespace KnightSight
             if (found != null) reply["elements"] = found.ConvertAll(e => e.Fields());
         }
 
-        // A region has no window of its own, so the one under its centre stands in for it.
-        // Menus and dialogs are windows of their own and show in the picture, so they count too.
+        // A region has no window of its own, so the one under its centre stands in for it, also
+        // while the pinboard lies over it. Menus and dialogs are windows of their own and show in
+        // the picture, so they count too.
         static List<IntPtr> Readable(Share s)
         {
+            if (s == null) return null;
             var area = s.Area;
-            var root = s.Window != IntPtr.Zero ? s.Window : Win.RootAt(area.X + area.Width / 2, area.Y + area.Height / 2);
+            int x = area.X + area.Width / 2, y = area.Y + area.Height / 2;
+            var root = s.Window != IntPtr.Zero ? s.Window : Win.RootAt(x, y);
+            if (Win.IsOwn(root)) root = Win.OtherAt(x, y);
             if (root == IntPtr.Zero || Win.IsOwn(root)) return null;
             var windows = new List<IntPtr> { root };
             windows.AddRange(Win.Popups(root));

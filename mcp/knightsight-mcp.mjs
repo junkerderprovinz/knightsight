@@ -108,7 +108,8 @@ const tools = [
     description:
       'Reads the notes the person pinned onto the share in KnightSight\'s pinboard and sent with Done: each with its kind ' +
       '(bug, wish or question), text, author and the places of its marks (one or more boxes or pins, labelled 3 or 3a, 3b), ' +
-      'a picture of the share with every mark labelled and a picture of each marked spot. Places use the coordinates of the ' +
+      'a picture of the share with every mark labelled and a picture of each marked spot. A mark made on an element of the ' +
+      'window also names it and the way to it, such as window "Notes" > button "Save". Places use the coordinates of the ' +
       'picture, which match look and click as long as the share keeps its size. ' +
       'Set wait to wait up to that many seconds for notes not read yet, for example after asking the person to pin some.',
     inputSchema: {
@@ -291,7 +292,8 @@ const KINDS = { bug: 'Bug', wish: 'Wish', question: 'Question' };
 
 function place(mark) {
   const at = mark.pin ? `a pin at ${mark.x}, ${mark.y}` : `${mark.x}, ${mark.y}, ${mark.width} x ${mark.height}`;
-  return `   ${mark.label}: ${at}`;
+  const on = mark.element ? `, on ${mark.element.path}` : '';
+  return `   ${mark.label}: ${at}${on}`;
 }
 
 function describe(note) {

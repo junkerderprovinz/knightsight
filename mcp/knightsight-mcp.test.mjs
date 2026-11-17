@@ -50,6 +50,13 @@ const ROUND = {
       number: 4, kind: 'question', text: 'Why two scrollbars?', author: 'Junker',
       marks: [{ label: '4a', x: 400, y: 300, pin: true, image: PNG }, { label: '4b', x: 10, y: 20, width: 30, height: 40, image: PNG }],
     },
+    {
+      number: 5, kind: 'wish', text: 'Call it Open.', author: '',
+      marks: [{
+        label: '5', x: 50, y: 30, width: 40, height: 24, image: PNG,
+        element: { type: 'menu item', name: 'Edit', path: 'window "notes.txt - Notepad" > menu bar "Application" > menu item "Edit"' },
+      }],
+    },
   ],
 };
 
@@ -87,14 +94,21 @@ test('returns each note with the places of its marks, the marked picture and a c
   await session(() => ROUND, async (c) => {
     const { result } = await c.call('tools/call', { name: 'pinboard', arguments: {} });
     const [summary, frame, ...spots] = result.content;
-    assert.equal(result.content.length, 8);
+    assert.equal(result.content.length, 10);
     assert.match(summary.text, /^Round 2, sent 2026-11-15T13:03:12Z on "notes.txt - Notepad"/);
     assert.match(summary.text, /1180 x 720/);
     assert.match(summary.text, /^3\. Bug, from Junker: The button is cut off\.\n {3}3: 120, 80, 160 x 40$/m);
     assert.match(summary.text, /^4\. Question, from Junker: Why two scrollbars\?\n {3}4a: a pin at 400, 300\n {3}4b: 10, 20, 30 x 40$/m);
     assert.deepEqual(frame, { type: 'image', data: PNG, mimeType: 'image/png' });
-    assert.deepEqual(spots.filter((part) => part.type === 'text').map((part) => part.text), ['Spot 3:', 'Spot 4a:', 'Spot 4b:']);
-    assert.equal(spots.filter((part) => part.type === 'image').length, 3);
+    assert.deepEqual(spots.filter((part) => part.type === 'text').map((part) => part.text), ['Spot 3:', 'Spot 4a:', 'Spot 4b:', 'Spot 5:']);
+    assert.equal(spots.filter((part) => part.type === 'image').length, 4);
+  });
+});
+
+test('names the element a mark sits on and the way to it', async () => {
+  await session(() => ROUND, async (c) => {
+    const { result } = await c.call('tools/call', { name: 'pinboard', arguments: {} });
+    assert.match(result.content[0].text, /^5\. Wish: Call it Open\.\n {3}5: 50, 30, 40 x 24, on window "notes\.txt - Notepad" > menu bar "Application" > menu item "Edit"$/m);
   });
 });
 
