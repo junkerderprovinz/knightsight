@@ -167,7 +167,8 @@ namespace KnightSight
         public static readonly string AreaTip = Pick("Drag a box around a spot (B)", "Ein Rechteck um eine Stelle ziehen (B)");
         public static readonly string NotesTip = Pick("See all notes or save them as a file", "Alle Notizen ansehen oder als Datei speichern");
         public static readonly string DoneTip = Pick("Hand the notes to your assistant", "Die Notizen an deinen Assistenten geben");
-        public static readonly string ThemeTip = Pick("Switch between light and dark", "Zwischen hell und dunkel wechseln");
+        public static readonly string ColourTip = Pick("Bar color", "Farbe der Leiste");
+        public static readonly string[] Colours = { Pick("Blue", "Blau"), Pick("Orange", "Orange"), Pick("Yellow", "Gelb"), Pick("Green", "Grün"), Pick("Pink", "Pink"), Pick("Violet", "Violett"), Pick("Grey", "Grau") };
         public static readonly string WalkUp = Pick("Scroll up or press ↑ for the part around it", "Nach oben scrollen oder ↑ drücken für den Teil drumherum");
         public static readonly string NoParts = Pick("This window shows no elements here. Drag a box instead, just like with Area (B).", "Dieses Fenster zeigt hier keine Elemente. Zieh einfach ein Rechteck auf, wie mit Bereich (B).");
         public static readonly string PinSpot = Pick("Pin", "Nadel");
@@ -584,6 +585,28 @@ namespace KnightSight
                 return false;
             }, IntPtr.Zero);
             return found;
+        }
+
+        // The panel of a KnightSight that already runs, found by the title every release gives
+        // it, so an older one is found too. Skip is the process asking.
+        public static IntPtr Running(uint skip)
+        {
+            var found = IntPtr.Zero;
+            Native.EnumWindows((h, param) =>
+            {
+                uint pid;
+                Native.GetWindowThreadProcessId(h, out pid);
+                if (pid == skip || Title(h) != "KnightSight" || !Class(h).StartsWith("WindowsForms10.")) return true;
+                found = h;
+                return false;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        public static void Raise(IntPtr h)
+        {
+            if (Native.IsIconic(h)) Native.ShowWindowAsync(h, 9);
+            Activate(h);
         }
 
         public static Rectangle Bounds(IntPtr h)
@@ -1611,8 +1634,7 @@ namespace KnightSight
         public static void Set(string name, string value) { Microsoft.Win32.Registry.SetValue(Key, name, value); }
     }
 
-    // The GlimStone palette for the two themes, and Noto Sans, which the build embeds. The theme
-    // follows Windows until the person picks one on the pinboard.
+    // The GlimStone palette for the two themes, and Noto Sans, which the build embeds.
     static class Theme
     {
         public static readonly Color Accent = Color.FromArgb(252, 196, 25);
@@ -1628,9 +1650,16 @@ namespace KnightSight
 
         public static void Load()
         {
-            var chosen = Saved.Get("Theme");
             var v = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1);
-            Use(chosen.Length > 0 ? chosen == "dark" : v is int && (int)v == 0);
+            Dark = v is int && (int)v == 0;
+            Ground = Dark ? Color.FromArgb(15, 14, 12) : Color.FromArgb(245, 243, 239);
+            Surface = Dark ? Color.FromArgb(28, 26, 23) : Color.White;
+            Surface2 = Dark ? Color.FromArgb(52, 48, 43) : Color.FromArgb(233, 230, 224);
+            Surface3 = Dark ? Color.FromArgb(78, 73, 66) : Color.FromArgb(210, 205, 197);
+            Hover = Dark ? Color.FromArgb(46, 43, 38) : Color.FromArgb(225, 221, 214);
+            Text = Dark ? Color.FromArgb(240, 236, 228) : Color.FromArgb(24, 22, 19);
+            Secondary = Dark ? Color.FromArgb(190, 184, 173) : Color.FromArgb(86, 81, 73);
+            Muted = Dark ? Color.FromArgb(140, 134, 124) : Color.FromArgb(115, 109, 100);
 
             foreach (var name in new[] { "NotoSans-Regular.ttf", "NotoSans-SemiBold.ttf" })
             {
@@ -1652,19 +1681,6 @@ namespace KnightSight
                 if (f.Name.Contains("SemiBold")) SemiBold = f;
                 else Regular = f;
             }
-        }
-
-        public static void Use(bool dark)
-        {
-            Dark = dark;
-            Ground = Dark ? Color.FromArgb(15, 14, 12) : Color.FromArgb(245, 243, 239);
-            Surface = Dark ? Color.FromArgb(28, 26, 23) : Color.White;
-            Surface2 = Dark ? Color.FromArgb(52, 48, 43) : Color.FromArgb(233, 230, 224);
-            Surface3 = Dark ? Color.FromArgb(78, 73, 66) : Color.FromArgb(210, 205, 197);
-            Hover = Dark ? Color.FromArgb(46, 43, 38) : Color.FromArgb(225, 221, 214);
-            Text = Dark ? Color.FromArgb(240, 236, 228) : Color.FromArgb(24, 22, 19);
-            Secondary = Dark ? Color.FromArgb(190, 184, 173) : Color.FromArgb(86, 81, 73);
-            Muted = Dark ? Color.FromArgb(140, 134, 124) : Color.FromArgb(115, 109, 100);
         }
 
         public static GraphicsPath Rounded(RectangleF r, float radius)
@@ -1721,7 +1737,7 @@ namespace KnightSight
         }
     }
 
-    enum Glyph { None, Window, Region, Screen, Start, Stop, Info, Minimise, Close, Pin, Mark, Notes, Done, Theme }
+    enum Glyph { None, Window, Region, Screen, Start, Stop, Info, Minimise, Close, Pin, Mark, Notes, Done, Palette }
 
     // Line icons drawn in the button's ink, so they follow hover, theme and disabled state.
     static class Glyphs
@@ -1808,10 +1824,11 @@ namespace KnightSight
                     case Glyph.Done:
                         g.DrawLines(pen, new[] { new PointF(b.X + s * 0.16f, b.Y + s * 0.52f), new PointF(b.X + s * 0.4f, b.Y + s * 0.76f), new PointF(b.X + s * 0.86f, b.Y + s * 0.26f) });
                         break;
-                    case Glyph.Theme:
-                        var disc = RectangleF.Inflate(b, -s * 0.1f, -s * 0.1f);
-                        g.DrawEllipse(pen, disc);
-                        g.FillPie(brush, disc.X, disc.Y, disc.Width, disc.Height, -90, 180);
+                    case Glyph.Palette:
+                        g.DrawEllipse(pen, RectangleF.Inflate(b, -s * 0.08f, -s * 0.08f));
+                        float spot = s * 0.17f;
+                        foreach (var c in new[] { new PointF(0.33f, 0.38f), new PointF(0.6f, 0.3f), new PointF(0.36f, 0.66f) })
+                            g.FillEllipse(brush, b.X + s * c.X - spot / 2, b.Y + s * c.Y - spot / 2, spot, spot);
                         break;
                     case Glyph.Close:
                         var state = g.Save();
@@ -1830,12 +1847,13 @@ namespace KnightSight
     // A rounded button: neutral on the card, the one filled accent button of the view, or a
     // blank control whose square lights up under the pointer. Fill, when set, paints it in a
     // colour of its own, such as the kind of a note. Tail is a small chip after the text, for a
-    // key or a count. OnGround sits it on the window's ground instead of a card.
+    // key or a count. OnGround sits it on the window's ground instead of a card, Tint on a bar
+    // of that colour.
     // Hover fades in and a press sinks it a little, both as transitions over Motion.Control.
     class SoftButton : Control
     {
         public bool Primary, Blank, Outline, OnGround;
-        public Color Fill = Color.Empty;
+        public Color Fill = Color.Empty, Tint = Color.Empty;
         public float Square;
         public float Radius;
         public Glyph Icon;
@@ -1892,11 +1910,13 @@ namespace KnightSight
         {
             var g = e.Graphics;
             Theme.Prepare(g);
-            var under = OnGround ? Theme.Ground : Theme.Surface;
+            bool tinted = !Tint.IsEmpty;
+            var under = tinted ? Tint : OnGround ? Theme.Ground : Theme.Surface;
             g.Clear(under);
             Color fill, ink;
             float t = Motion.Ease(lit);
-            if (Blank) { fill = Motion.Mix(under, Theme.Hover, t); ink = Motion.Mix(Theme.Secondary, Theme.Text, t); }
+            if (tinted) Tinted(t, out fill, out ink);
+            else if (Blank) { fill = Motion.Mix(under, Theme.Hover, t); ink = Motion.Mix(Theme.Secondary, Theme.Text, t); }
             else if (!Enabled) { fill = Theme.Surface2; ink = Theme.Muted; }
             else if (!Fill.IsEmpty) { fill = Motion.Mix(Fill, Color.White, 0.2f * t); ink = Theme.AccentInk; }
             else if (Outline) { fill = Motion.Mix(Theme.Surface2, Theme.Surface3, t); ink = Theme.Text; }
@@ -1909,9 +1929,9 @@ namespace KnightSight
             {
                 using (var brush = new SolidBrush(fill)) g.FillPath(brush, path);
                 if (Outline && Enabled)
-                    using (var edge = new Pen(Theme.Accent, 1.5f * K)) g.DrawPath(edge, path);
+                    using (var edge = new Pen(tinted ? Theme.AccentInk : Theme.Accent, (tinted ? 2 : 1.5f) * K)) g.DrawPath(edge, path);
                 if (Focused && ShowFocusCues)
-                    using (var ring = new Pen(Theme.Accent, 2 * K)) g.DrawPath(ring, path);
+                    using (var ring = new Pen(tinted ? Theme.AccentInk : Theme.Accent, 2 * K)) g.DrawPath(ring, path);
             }
 
             float icon = Icon == Glyph.None ? 0 : 16 * K * scale, gap = Text.Length > 0 && icon > 0 ? 8 * K : 0;
@@ -1930,13 +1950,33 @@ namespace KnightSight
                 float tall = 20 * K * scale;
                 var box = new RectangleF(x + icon + gap + textWidth + chipGap, r.Y + (r.Height - tall) / 2, chip, tall);
                 bool filled = Primary || !Fill.IsEmpty;
+                var chipFill = tinted ? (Primary ? Color.FromArgb(46, 255, 255, 255) : Tint) : filled ? Color.FromArgb(40, 0, 0, 0) : under;
                 using (var path = Theme.Rounded(box, 4 * K))
-                using (var brush = new SolidBrush(filled ? Color.FromArgb(40, 0, 0, 0) : under))
+                using (var brush = new SolidBrush(chipFill))
                     g.FillPath(brush, path);
-                using (var brush = new SolidBrush(filled ? ink : Theme.Secondary))
+                using (var brush = new SolidBrush(filled || tinted ? ink : Theme.Secondary))
                 using (var centred = new StringFormat(format) { Alignment = StringAlignment.Center })
                     g.DrawString(Tail, tailFont, brush, box, centred);
             }
+        }
+
+        // As on the web pinboard's coloured bar: light buttons mixed from the bar's colour, the
+        // chosen one dark with the colour as its ink.
+        void Tinted(float t, out Color fill, out Color ink)
+        {
+            ink = Theme.AccentInk;
+            if (Blank) fill = Motion.Mix(Tint, Color.White, 0.35f * t);
+            else if (!Enabled)
+            {
+                fill = Motion.Mix(Tint, Color.White, 0.7f);
+                ink = Motion.Mix(Theme.AccentInk, fill, 0.55f);
+            }
+            else if (Primary)
+            {
+                fill = Motion.Mix(Theme.AccentInk, Color.FromArgb(57, 57, 57), t);
+                ink = Tint;
+            }
+            else fill = Motion.Mix(Tint, Color.White, (Outline ? 0.65f : 0.45f) + 0.2f * t);
         }
 
         // The width the content needs with Pad on either side.
@@ -2411,32 +2451,16 @@ namespace KnightSight
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            Dress();
-            int rounded = 2;
+            int on = Theme.Dark ? 1 : 0, rounded = 2, border = Edged ? ColorRef(Theme.Surface3) : unchecked((int)0xFFFFFFFE);
+            Native.DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int));
             Native.DwmSetWindowAttribute(Handle, 33, ref rounded, sizeof(int));
+            Native.DwmSetWindowAttribute(Handle, 34, ref border, sizeof(int));
             int still = Instant ? 1 : 0;
             Native.DwmSetWindowAttribute(Handle, 3, ref still, sizeof(int));
             // A window with no frame of its own gets its shadow back from one row of DWM frame.
             var row = new Native.MARGINS { Bottom = 1 };
             Native.DwmExtendFrameIntoClientArea(Handle, ref row);
         }
-
-        void Dress()
-        {
-            int on = Theme.Dark ? 1 : 0, border = Edged ? ColorRef(Theme.Surface3) : unchecked((int)0xFFFFFFFE);
-            Native.DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int));
-            Native.DwmSetWindowAttribute(Handle, 34, ref border, sizeof(int));
-        }
-
-        // After the theme changed, so a window already open follows it.
-        public void Restyle()
-        {
-            if (IsHandleCreated) Dress();
-            Recolor();
-            Invalidate(true);
-        }
-
-        protected virtual void Recolor() { BackColor = Theme.Surface; }
     }
 
     // A text box on the ground colour that shows its hint while it is empty.
@@ -2540,16 +2564,6 @@ namespace KnightSight
         }
 
         protected override bool ShowWithoutActivation { get { return true; } }
-
-        protected override void Recolor()
-        {
-            base.Recolor();
-            foreach (var field in new[] { text, author })
-            {
-                field.BackColor = Theme.Ground;
-                field.ForeColor = Theme.Text;
-            }
-        }
 
         // The line under the title that says where the marks of the note sit.
         public string Where
@@ -2842,6 +2856,36 @@ namespace KnightSight
 
     enum Tool { Mark, Pin, Area }
 
+    // The colours the pinboard's bar can wear, the same as the web pinboard's. Grey is the card
+    // of the theme, the others make the bar easy to find over a busy window.
+    static class BarColour
+    {
+        public static readonly string[] Names = { "blue", "orange", "yellow", "green", "pink", "violet", "grey" };
+        static readonly Color[] Colours =
+        {
+            Color.FromArgb(29, 153, 243), Color.FromArgb(255, 131, 43), Color.FromArgb(241, 194, 27), Color.FromArgb(66, 190, 101),
+            Color.FromArgb(255, 126, 182), Color.FromArgb(165, 110, 255), Color.Empty,
+        };
+
+        // Empty for grey and for a name it does not know, so the bar stays plain.
+        public static Color Of(string name)
+        {
+            int i = Array.IndexOf(Names, name);
+            return i < 0 ? Color.Empty : Colours[i];
+        }
+
+        // The colour picked last, kept across starts.
+        public static string Chosen
+        {
+            get
+            {
+                var name = Saved.Get("BarColour");
+                return Array.IndexOf(Names, name) < 0 ? "grey" : name;
+            }
+            set { Saved.Set("BarColour", value); }
+        }
+    }
+
     // The bar over the share with the pinboard's tools, the notes and Done, after the bar of the
     // web pinboard. Everything on it but the buttons is a handle to drag it by.
     class Toolbar : Card
@@ -2849,16 +2893,17 @@ namespace KnightSight
         readonly float k;
         readonly SoftButton mark = new SoftButton { Icon = Glyph.Mark, Tail = "N" }, pin = new SoftButton { Icon = Glyph.Pin, Tail = "P" },
             area = new SoftButton { Icon = Glyph.Region, Tail = "B" }, notes = new SoftButton { Icon = Glyph.Notes, Tail = "0" },
-            done = new SoftButton { Icon = Glyph.Done }, theme = new SoftButton { Blank = true, Icon = Glyph.Theme },
+            done = new SoftButton { Icon = Glyph.Done }, palette = new SoftButton { Blank = true, Icon = Glyph.Palette },
             close = new SoftButton { Blank = true, Icon = Glyph.Close };
         readonly ToolTip tip = new ToolTip();
-        readonly Font gripFont;
-        readonly string label = Say.Pinboard.ToUpper(CultureInfo.CurrentCulture);
+        readonly Swatches swatches;
+        DateTime swatchesClosed;
         public Action<Tool> Chosen;
-        public Action ListToggled, Done, Rethemed, Dismissed;
+        public Action ListToggled, Done, Dismissed;
         public Func<Keys, bool> Pressed;
         public Tool Tool { get; private set; }
         public int Count { get; private set; }
+        public string Colour { get; private set; }
 
         public Toolbar(float k)
         {
@@ -2866,34 +2911,38 @@ namespace KnightSight
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            BackColor = Theme.Surface;
             DoubleBuffered = true;
             Edged = true;
             Instant = true;
-            gripFont = new Font(Theme.SemiBold, 12 * k, GraphicsUnit.Pixel);
             var buttonFont = new Font(Theme.SemiBold, 14 * k, GraphicsUnit.Pixel);
-            int x = LabelLeft + (int)Math.Ceiling(Spaced(null, 0, 0)) + S(14);
+            int x = S(36);
             x = Put(mark, Say.MarkTool, Say.MarkTip, buttonFont, x);
             x = Put(pin, Say.PinTool, Say.PinTip, buttonFont, x);
             x = Put(area, Say.AreaTool, Say.AreaTip, buttonFont, x);
             x = Put(notes, Say.Notes, Say.NotesTip, buttonFont, x);
             x = Put(done, Say.Done, Say.DoneTip, buttonFont, x);
-            x = Put(theme, "", Say.ThemeTip, buttonFont, x);
+            x = Put(palette, "", Say.ColourTip, buttonFont, x);
             x = Put(close, "", Say.ClosePinboard, buttonFont, x);
             Size = new Size(x, S(56));
             Grip = Height;
+            swatches = new Swatches(k) { Owner = this };
+            swatches.Picked = name =>
+            {
+                Wear(name);
+                BarColour.Chosen = name;
+            };
+            swatches.VisibleChanged += (o, e) => { if (!swatches.Visible) swatchesClosed = DateTime.UtcNow; };
             mark.Click += (o, e) => Chosen(Tool.Mark);
             pin.Click += (o, e) => Chosen(Tool.Pin);
             area.Click += (o, e) => Chosen(Tool.Area);
             notes.Click += (o, e) => ListToggled();
             done.Click += (o, e) => Done();
-            theme.Click += (o, e) => Rethemed();
+            palette.Click += (o, e) => OpenSwatches();
             close.Click += (o, e) => Dismissed();
+            Wear(BarColour.Chosen);
         }
 
         int S(float v) { return (int)Math.Round(v * k); }
-
-        int LabelLeft { get { return S(32); } }
 
         int Put(SoftButton b, string text, string hint, Font font, int x)
         {
@@ -2916,6 +2965,40 @@ namespace KnightSight
             return Pressed(keyData) || base.ProcessCmdKey(ref msg, keyData);
         }
 
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            if (!Visible) swatches.Hide();
+            base.OnVisibleChanged(e);
+        }
+
+        public void Wear(string name)
+        {
+            Colour = name;
+            var tint = BarColour.Of(name);
+            BackColor = tint.IsEmpty ? Theme.Surface : tint;
+            foreach (Control c in Controls)
+            {
+                ((SoftButton)c).Tint = tint;
+                c.Invalidate();
+            }
+            swatches.Chosen = name;
+            Invalidate();
+        }
+
+        // Above the bar, or below it where the screen ends above. A press on the button that just
+        // closed the swatches by taking the focus from them leaves them closed.
+        void OpenSwatches()
+        {
+            if (swatches.Visible || DateTime.UtcNow - swatchesClosed < TimeSpan.FromMilliseconds(300)) return;
+            var work = Screen.FromControl(this).WorkingArea;
+            int gap = S(8), x = Math.Min(Right - swatches.Width, work.Right - swatches.Width);
+            int y = Top - gap - swatches.Height;
+            if (y < work.Top) y = Bottom + gap;
+            swatches.Location = new Point(Math.Max(work.Left, x), y);
+            swatches.Show();
+            swatches.Activate();
+        }
+
         public void Reflect(Tool tool, int count, bool listOpen, bool canSend)
         {
             Tool = tool;
@@ -2929,34 +3012,94 @@ namespace KnightSight
             foreach (Control c in Controls) c.Invalidate();
         }
 
-        // The name in capitals with some air between the letters, which GDI+ has no setting for.
-        // Without a Graphics it only measures.
-        float Spaced(Graphics g, float x, float y)
-        {
-            float start = x;
-            using (var format = new StringFormat(StringFormat.GenericTypographic))
-            using (var bmp = new Bitmap(1, 1))
-            using (var measure = Graphics.FromImage(bmp))
-            using (var ink = new SolidBrush(Theme.Muted))
-                foreach (char c in label)
-                {
-                    var letter = c.ToString();
-                    if (g != null) g.DrawString(letter, gripFont, ink, x, y, format);
-                    x += measure.MeasureString(letter, gripFont, PointF.Empty, format).Width + 1.7f * k;
-                }
-            return x - start;
-        }
-
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             Theme.Prepare(g);
             float d = 3 * k, top = Height / 2f - 9 * k;
-            using (var dot = new SolidBrush(Theme.Surface3))
+            var ink = BarColour.Of(Colour).IsEmpty ? Theme.Surface3 : Color.FromArgb(115, Theme.AccentInk);
+            using (var dot = new SolidBrush(ink))
                 for (int row = 0; row < 4; row++)
                     for (int col = 0; col < 2; col++)
                         g.FillEllipse(dot, 14 * k + col * 5 * k, top + row * 5 * k, d, d);
-            Spaced(g, LabelLeft, Height / 2f - gripFont.GetHeight(g) / 2);
+        }
+    }
+
+    // The small card of colours the bar's palette button opens. It closes once it loses the
+    // focus, the way a menu does.
+    class Swatches : Card
+    {
+        readonly float k;
+        readonly SoftButton[] swatches = new SoftButton[BarColour.Names.Length];
+        string chosen = "";
+        public Action<string> Picked;
+
+        public Swatches(float k)
+        {
+            this.k = k;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Surface;
+            DoubleBuffered = true;
+            Edged = true;
+            Instant = true;
+            var tip = new ToolTip();
+            int pad = S(12), edge = S(28), gap = S(10);
+            for (int i = 0; i < swatches.Length; i++)
+            {
+                var name = BarColour.Names[i];
+                var colour = BarColour.Of(name);
+                swatches[i] = new SoftButton
+                {
+                    Fill = colour.IsEmpty ? Theme.Surface3 : colour, Radius = S(6), K = k,
+                    Bounds = new Rectangle(pad + i * (edge + gap), pad, edge, edge),
+                };
+                swatches[i].Click += (o, e) =>
+                {
+                    Picked(name);
+                    Hide();
+                };
+                tip.SetToolTip(swatches[i], Say.Colours[i]);
+                Controls.Add(swatches[i]);
+            }
+            Size = new Size(2 * pad + swatches.Length * edge + (swatches.Length - 1) * gap, 2 * pad + edge);
+        }
+
+        int S(float v) { return (int)Math.Round(v * k); }
+
+        public string Chosen
+        {
+            set
+            {
+                chosen = value;
+                Invalidate();
+            }
+        }
+
+        protected override void OnDeactivate(EventArgs e)
+        {
+            Hide();
+            base.OnDeactivate(e);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData != Keys.Escape) return base.ProcessCmdKey(ref msg, keyData);
+            Hide();
+            return true;
+        }
+
+        // A ring around the colour the bar wears.
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            int i = Array.IndexOf(BarColour.Names, chosen);
+            if (i < 0) return;
+            var g = e.Graphics;
+            Theme.Prepare(g);
+            using (var ring = new Pen(Theme.Text, 2 * k))
+            using (var path = Theme.Rounded(RectangleF.Inflate(swatches[i].Bounds, 3 * k, 3 * k), 8 * k))
+                g.DrawPath(ring, path);
         }
     }
 
@@ -3032,7 +3175,7 @@ namespace KnightSight
         bool reading;
         int hit = -1, part = -1;
         Point pointer;
-        public Action Finish, SaveFile, Closed, Restyled;
+        public Action Finish, SaveFile, Closed;
         // The windows whose elements can be marked, topmost first, or null for none.
         public Func<List<IntPtr>> Readable;
 
@@ -3067,11 +3210,6 @@ namespace KnightSight
             };
             bar.Chosen = Choose;
             bar.ListToggled = () => ShowList(!listOpen);
-            bar.Rethemed = () =>
-            {
-                Restyled();
-                if (!area.IsEmpty) Render();
-            };
             bar.Dismissed = () => Closed();
             overlay.MouseDown += (o, e) => Pressed(e);
             overlay.MouseMove += (o, e) => Moved(e);
@@ -3612,7 +3750,13 @@ namespace KnightSight
             bool first;
             using (var mutex = new Mutex(true, @"Local\KnightSightPanel", out first))
             {
-                if (!first) return;
+                // Whoever starts KnightSight again is looking for its panel.
+                if (!first)
+                {
+                    var running = Win.Running((uint)Process.GetCurrentProcess().Id);
+                    if (running != IntPtr.Zero) Win.Raise(running);
+                    return;
+                }
                 if (!Native.SetProcessDpiAwarenessContext(new IntPtr(-4))) Native.SetProcessDPIAware();
                 Application.EnableVisualStyles();
                 Theme.Load();
@@ -3681,7 +3825,7 @@ namespace KnightSight
             close.Click += (o, e) => Close();
             pin.Click += (o, e) => TogglePinboard();
             Controls.AddRange(new Control[] { pickWindow, pickRegion, pickScreen, pin, toggle, info, minimise, close });
-            pinboard = new Pinboard(board, k) { Finish = FinishPinboard, SaveFile = SavePinboard, Closed = ClosePinboard, Restyled = SwitchTheme };
+            pinboard = new Pinboard(board, k) { Finish = FinishPinboard, SaveFile = SavePinboard, Closed = ClosePinboard };
             // Readable lists the share's own window first, the pinboard wants its menus on top.
             pinboard.Readable = () =>
             {
@@ -3723,16 +3867,6 @@ namespace KnightSight
             b.Square = S(28);
             b.Bounds = Rectangle.Round(new RectangleF(S(x), 0, S(42), S(BarHeight)));
             tip.SetToolTip(b, name);
-        }
-
-        protected override void Recolor() { BackColor = Theme.Ground; }
-
-        void SwitchTheme()
-        {
-            Theme.Use(!Theme.Dark);
-            Saved.Set("Theme", Theme.Dark ? "dark" : "light");
-            Restyle();
-            foreach (var card in pinboard.Cards) card.Restyle();
         }
 
         // The minimise box lets Windows play its animation.

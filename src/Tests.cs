@@ -502,6 +502,25 @@ namespace KnightSight
             True(!new Pinboard(new Board(), 1).Key(Keys.Up), "nothing to walk from");
         }
 
+        static void BarOffersTheColoursOfTheWebPinboard()
+        {
+            Same("blue orange yellow green pink violet grey", string.Join(" ", BarColour.Names));
+            Same(Color.FromArgb(255, 126, 182), BarColour.Of("pink"));
+            True(BarColour.Of("grey").IsEmpty, "grey is the theme's card");
+            True(BarColour.Of("plaid").IsEmpty, "an unknown name leaves the bar plain");
+            Same(BarColour.Names.Length, Say.Colours.Length);
+        }
+
+        static void BarWearsTheColourPicked()
+        {
+            var bar = new Pinboard(new Board(), 1).Bar;
+            bar.Wear("green");
+            Same("green", bar.Colour);
+            Same(Color.FromArgb(66, 190, 101), bar.BackColor);
+            bar.Wear("grey");
+            Same(Theme.Surface, bar.BackColor);
+        }
+
         static void BarCountsTheNotes()
         {
             var board = BoardWith(new RectangleF(1, 1, 5, 5), new RectangleF(2, 2, 0, 0));
@@ -665,6 +684,26 @@ namespace KnightSight
                 True(!share.Gone, "the window is still there");
                 form.Dispose();
                 True(share.Gone, "the window has closed");
+            }
+        }
+
+        static void SecondStartFindsThePanelByItsTitle()
+        {
+            using (var form = new Form { Text = "KnightSight" })
+            {
+                var panel = form.Handle;
+                Same(panel, Win.Running(0));
+                form.Text = "KnightSight notes";
+                True(Win.Running(0) != panel, "another title is not the panel");
+            }
+        }
+
+        static void SecondStartSkipsItsOwnWindows()
+        {
+            using (var form = new Form { Text = "KnightSight" })
+            {
+                var panel = form.Handle;
+                True(Win.Running((uint)Process.GetCurrentProcess().Id) != panel, "its own window is not the running panel");
             }
         }
 
