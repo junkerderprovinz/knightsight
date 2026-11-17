@@ -70,21 +70,9 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
-    <release version="1.2.1" date="2026-11-16">
+    <release version="1.1.0" date="2026-11-18">
       <description>
-        <p>A look lists the controls inside the share, which clicks can use. A Screen button shares a whole monitor, a yellow pointer shows where your assistant acts on X11, and the panel has more room.</p>
-      </description>
-      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.2.1</url>
-    </release>
-    <release version="1.2.0" date="2026-11-16">
-      <description>
-        <p>A new panel with a finder: a small live picture of the shared window that turns from grey to colour when the share starts, with a sweeping line and a dot where your assistant clicks while it works. A minimized window comes back behind your other windows when your assistant asks for it, on X11.</p>
-      </description>
-      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.2.0</url>
-    </release>
-    <release version="1.1.0" date="2026-11-15">
-      <description>
-        <p>The pinboard: while you share, Ctrl+Shift+A or the pin button lets you mark one or more spots of the share, write a note to them and send all notes to your assistant with Done.</p>
+        <p>The pinboard: while you share, mark controls, pins or areas of the share, write a note to them and send them to your assistant, or tell it everything fits. A look lists the controls inside the share, a Screen button shares a whole monitor, a yellow pointer shows where your assistant acts on X11, and a new panel shows the share as a small live picture.</p>
       </description>
       <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.1.0</url>
     </release>
