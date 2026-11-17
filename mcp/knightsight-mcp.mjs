@@ -106,10 +106,11 @@ const tools = [
   {
     name: 'pinboard',
     description:
-      'Reads the notes the person pinned onto the share in KnightSight\'s pinboard and sent with Done: each with its kind ' +
+      'Reads the notes the person pinned onto the share in KnightSight\'s pinboard and sent: each with its kind ' +
       '(bug, wish or question), text, author and the places of its marks (one or more boxes or pins, labelled 3 or 3a, 3b), ' +
       'a picture of the share with every mark labelled and a picture of each marked spot. A mark made on an element of the ' +
-      'window also names it and the way to it, such as window "Notes" > button "Save". Places use the coordinates of the ' +
+      'window also names it and the way to it, such as window "Notes" > button "Save". A round sent with All good says ' +
+      'that the person approves the preview, with or without notes. Places use the coordinates of the ' +
       'picture, which match look and click as long as the share keeps its size. ' +
       'Set wait to wait up to that many seconds for notes not read yet, for example after asking the person to pin some.',
     inputSchema: {
@@ -287,7 +288,7 @@ async function steps(args) {
 
 const HOW_TO_PIN =
   'While sharing, the person opens the pinboard with Ctrl+Shift+A (Cmd+Shift+A on a Mac) or the pin button ' +
-  'in the KnightSight window, pins notes onto the share and clicks Done.';
+  'in the KnightSight window, pins notes onto the share and sends them.';
 const KINDS = { bug: 'Bug', wish: 'Wish', question: 'Question' };
 
 function place(mark) {
@@ -303,9 +304,12 @@ function describe(note) {
 
 function round(reply) {
   const head = `Round ${reply.round}, sent ${reply.sent} on "${reply.title}". The picture is ${reply.width} x ${reply.height}.`;
+  const verdict = reply.approved
+    ? [`Approved: everything fits. The person looked at the preview and signed it off${reply.notes.length ? ', with the notes below' : ''}.`]
+    : [];
   return {
     content: [
-      { type: 'text', text: [head, ...reply.notes.map(describe)].join('\n') },
+      { type: 'text', text: [...verdict, head, ...reply.notes.map(describe)].join('\n') },
       { type: 'image', data: reply.image, mimeType: 'image/png' },
       ...reply.notes.flatMap((note) => note.marks.flatMap((mark) => [
         { type: 'text', text: `Spot ${mark.label}:` },

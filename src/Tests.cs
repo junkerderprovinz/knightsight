@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Reflection;
 using System.Web.Script.Serialization;
 using System.Windows.Automation;
@@ -519,6 +520,84 @@ namespace KnightSight
             Same(Color.FromArgb(66, 190, 101), bar.BackColor);
             bar.Wear("grey");
             Same(Theme.Surface, bar.BackColor);
+        }
+
+        // WCAG's contrast ratio, from 1 for the same colour to 21 for black on white.
+        static double Contrast(Color a, Color b)
+        {
+            Func<Color, double> light = c =>
+            {
+                Func<int, double> channel = v => { double s = v / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); };
+                return 0.2126 * channel(c.R) + 0.7152 * channel(c.G) + 0.0722 * channel(c.B);
+            };
+            double x = light(a), y = light(b);
+            return (Math.Max(x, y) + 0.05) / (Math.Min(x, y) + 0.05);
+        }
+
+        static void SelectedToolStandsOutCalmlyOnEveryBarColour()
+        {
+            bool dark = Theme.Dark;
+            try
+            {
+                foreach (var night in new[] { false, true })
+                {
+                    Theme.Use(night);
+                    foreach (var name in BarColour.Names)
+                    {
+                        var tint = BarColour.Of(name);
+                        Color fill, ring, ink;
+                        SoftButton.SelectedLook(tint, out fill, out ring, out ink);
+                        var where = name + (night ? " in dark" : " in light");
+                        True(Contrast(ring, fill) >= 3, "the ring shows on " + where + ": " + Contrast(ring, fill).ToString("0.0"));
+                        True(Contrast(ink, fill) >= 4.5, "the label reads on " + where + ": " + Contrast(ink, fill).ToString("0.0"));
+                        True(Math.Max(fill.R, Math.Max(fill.G, fill.B)) > 60, "no black fill on " + where);
+                        var plain = tint.IsEmpty ? Theme.Surface2 : SoftButton.Plain(tint);
+                        True(fill != plain, "selected differs from the others on " + where);
+                    }
+                }
+            }
+            finally { Theme.Use(dark); }
+        }
+
+        static void ApprovalTravelsAsAFlagEvenWithoutNotes()
+        {
+            var board = BoardWith();
+            Dictionary<string, object> round;
+            using (var bmp = new Bitmap(100, 100)) round = board.Seal(bmp, 1, "Preview", DateTime.UtcNow, true, true).Fields;
+            Same(true, round["approved"]);
+            Same(0, ((IList)round["notes"]).Count);
+        }
+
+        static void RoundWithoutApprovalCarriesNoFlag()
+        {
+            True(!RoundOf(BoardWith(new RectangleF(1, 1, 5, 5)), new Size(100, 100), 1).ContainsKey("approved"), "an ordinary round stays as it was");
+        }
+
+        static void ApprovalWithoutTheNotesLeavesThemOnTheBoard()
+        {
+            var board = BoardWith(new RectangleF(1, 1, 5, 5));
+            Round round;
+            using (var bmp = new Bitmap(100, 100)) round = board.Seal(bmp, 1, "Preview", DateTime.UtcNow, true, false);
+            Same(0, ((IList)round.Fields["notes"]).Count);
+            board.Send(round);
+            Same(1, board.Notes.Count);
+        }
+
+        static void ApprovalWithTheNotesTakesThemAlong()
+        {
+            var board = BoardWith(new RectangleF(1, 1, 5, 5));
+            Round round;
+            using (var bmp = new Bitmap(100, 100)) round = board.Seal(bmp, 1, "Preview", DateTime.UtcNow, true, true);
+            Same(1, ((IList)round.Fields["notes"]).Count);
+            board.Send(round);
+            Same(0, board.Notes.Count);
+        }
+
+        static void SavedPageShowsTheApproval()
+        {
+            string page;
+            using (var bmp = new Bitmap(100, 100)) page = Board.Page(BoardWith().Seal(bmp, 1, "Preview", DateTime.UtcNow, true, true));
+            True(page.Contains("<p class=\"approved\">" + WebUtility.HtmlEncode(Say.Approval) + "</p>"), "the approval heads the page");
         }
 
         static void BarCountsTheNotes()

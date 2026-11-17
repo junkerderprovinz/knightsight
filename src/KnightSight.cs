@@ -155,7 +155,11 @@ namespace KnightSight
         public static readonly string EmptyBoard = Pick("Press N to mark an element, P to set a pin or B to drag an area.", "Drück N zum Markieren, P für eine Nadel oder B für einen Bereich.");
         public static readonly string GoThere = Pick("Go there", "Hingehen");
         public static readonly string SaveFile = Pick("Save as file", "Als Datei speichern");
-        public static readonly string Done = Pick("Done", "Fertig");
+        public static readonly string Send = Pick("Send", "Absenden");
+        public static readonly string AllGood = Pick("All good", "Alles passt");
+        public static readonly string AllGoodTip = Pick("You looked at it and everything fits. Tells your assistant it is approved.", "Du hast es dir angesehen und alles passt. Sagt deinem Assistenten, dass es abgenommen ist.");
+        public static readonly string Approval = Pick("Approved: everything fits", "Abgenommen: alles passt");
+        public static readonly string SendAlong = Pick("There are still notes on the pinboard. Send them along with the approval?", "Auf der Pinnwand liegen noch Notizen. Sollen sie mit der Abnahme mitgehen?");
         public static readonly string ClosePinboard = Pick("Close pinboard", "Pinnwand schließen");
         public static readonly string CloseList = Pick("Close the list", "Liste schließen");
         public static readonly string Notes = Pick("Notes", "Notizen");
@@ -185,6 +189,14 @@ namespace KnightSight
         public static string AreaSpot(SizeF size) { return Pick("Area ", "Bereich ") + Math.Round(size.Width) + " x " + Math.Round(size.Height); }
         public static string Quote(string name) { return Pick("\"" + name + "\"", "„" + name + "“"); }
 
+        public static string Approved(int notes)
+        {
+            if (notes == 0) return Pick("Approved, everything fits. Your assistant can fetch it now.", "Abgenommen, alles passt. Dein Assistent kann es abholen.");
+            return notes == 1
+                ? Pick("Approved with 1 note. Your assistant can fetch it now.", "Abgenommen mit 1 Notiz. Dein Assistent kann sie abholen.")
+                : Pick("Approved with " + notes + " notes. Your assistant can fetch them now.", "Abgenommen mit " + notes + " Notizen. Dein Assistent kann sie abholen.");
+        }
+
         public static string Sent(int count)
         {
             return count == 1
@@ -202,14 +214,14 @@ namespace KnightSight
             "A pulsing frame means something is being done in there. Its top\nright corner says what, such as \"Typing\" or \"Taking a screenshot\".\n\n" +
             "Carry on working as usual. Mouse and keyboard stay\nwith you, even while the window is covered.\n" +
             "A minimized window comes back behind your other windows\nas soon as your assistant asks for it. Store apps come to the front\nfor a moment once mouse and keyboard rest for about a second.\n\n" +
-            "Ctrl+Shift+A opens the pinboard while you share.\nMark spots, write a note to them and click Done,\nthen your assistant can fetch them.\n\n" +
+            "Ctrl+Shift+A opens the pinboard while you share.\nMark spots, write a note to them and click Send,\nthen your assistant can fetch them. Click All good\nwhen everything fits.\n\n" +
             "Ctrl+Alt+Shift+X ends the share at once,\nand so does closing this window.",
             "Grauer Rahmen: gewählt, aber noch nicht freigegeben.\n" +
             "Gelber Rahmen: freigegeben. Angeschaut, geklickt und getippt\nwird nur darin, und erst auf Anfrage.\n" +
             "Pulsiert der Rahmen, wird gerade darin gearbeitet. Was genau,\nsteht oben rechts am Rahmen, etwa „Tippe“ oder „Mache Screenshot“.\n\n" +
             "Du kannst nebenbei normal weiterarbeiten. Maus und Tastatur\nbleiben bei dir, auch wenn das Fenster zugedeckt ist.\n" +
             "Ein minimiertes Fenster kommt hinter deinen anderen Fenstern zurück,\nsobald dein Assistent danach fragt. Store-Apps kommen kurz nach vorn,\nsobald du gut eine Sekunde lang nichts eingibst.\n\n" +
-            "Strg+Umschalt+A öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib eine Notiz dazu und\nklick auf Fertig. Dann kann dein Assistent sie abholen.\n\n" +
+            "Strg+Umschalt+A öffnet beim Freigeben die Pinnwand.\nMarkier Stellen, schreib eine Notiz dazu und\nklick auf Absenden. Dann kann dein Assistent sie abholen.\nWenn alles stimmt, klick auf Alles passt.\n\n" +
             "Strg+Alt+Umschalt+X beendet die Freigabe sofort,\nSchließen beendet sie auch.");
     }
 
@@ -1651,15 +1663,7 @@ namespace KnightSight
         public static void Load()
         {
             var v = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1);
-            Dark = v is int && (int)v == 0;
-            Ground = Dark ? Color.FromArgb(15, 14, 12) : Color.FromArgb(245, 243, 239);
-            Surface = Dark ? Color.FromArgb(28, 26, 23) : Color.White;
-            Surface2 = Dark ? Color.FromArgb(52, 48, 43) : Color.FromArgb(233, 230, 224);
-            Surface3 = Dark ? Color.FromArgb(78, 73, 66) : Color.FromArgb(210, 205, 197);
-            Hover = Dark ? Color.FromArgb(46, 43, 38) : Color.FromArgb(225, 221, 214);
-            Text = Dark ? Color.FromArgb(240, 236, 228) : Color.FromArgb(24, 22, 19);
-            Secondary = Dark ? Color.FromArgb(190, 184, 173) : Color.FromArgb(86, 81, 73);
-            Muted = Dark ? Color.FromArgb(140, 134, 124) : Color.FromArgb(115, 109, 100);
+            Use(v is int && (int)v == 0);
 
             foreach (var name in new[] { "NotoSans-Regular.ttf", "NotoSans-SemiBold.ttf" })
             {
@@ -1681,6 +1685,19 @@ namespace KnightSight
                 if (f.Name.Contains("SemiBold")) SemiBold = f;
                 else Regular = f;
             }
+        }
+
+        public static void Use(bool dark)
+        {
+            Dark = dark;
+            Ground = Dark ? Color.FromArgb(15, 14, 12) : Color.FromArgb(245, 243, 239);
+            Surface = Dark ? Color.FromArgb(28, 26, 23) : Color.White;
+            Surface2 = Dark ? Color.FromArgb(52, 48, 43) : Color.FromArgb(233, 230, 224);
+            Surface3 = Dark ? Color.FromArgb(78, 73, 66) : Color.FromArgb(210, 205, 197);
+            Hover = Dark ? Color.FromArgb(46, 43, 38) : Color.FromArgb(225, 221, 214);
+            Text = Dark ? Color.FromArgb(240, 236, 228) : Color.FromArgb(24, 22, 19);
+            Secondary = Dark ? Color.FromArgb(190, 184, 173) : Color.FromArgb(86, 81, 73);
+            Muted = Dark ? Color.FromArgb(140, 134, 124) : Color.FromArgb(115, 109, 100);
         }
 
         public static GraphicsPath Rounded(RectangleF r, float radius)
@@ -1737,7 +1754,7 @@ namespace KnightSight
         }
     }
 
-    enum Glyph { None, Window, Region, Screen, Start, Stop, Info, Minimise, Close, Pin, Mark, Notes, Done, Palette }
+    enum Glyph { None, Window, Region, Screen, Start, Stop, Info, Minimise, Close, Pin, Mark, Notes, Done, Palette, Send }
 
     // Line icons drawn in the button's ink, so they follow hover, theme and disabled state.
     static class Glyphs
@@ -1824,6 +1841,18 @@ namespace KnightSight
                     case Glyph.Done:
                         g.DrawLines(pen, new[] { new PointF(b.X + s * 0.16f, b.Y + s * 0.52f), new PointF(b.X + s * 0.4f, b.Y + s * 0.76f), new PointF(b.X + s * 0.86f, b.Y + s * 0.26f) });
                         break;
+                    case Glyph.Send:
+                        using (var path = new GraphicsPath())
+                        {
+                            path.AddPolygon(new[]
+                            {
+                                new PointF(b.X + s * 0.08f, b.Y + s * 0.46f), new PointF(b.X + s * 0.9f, b.Y + s * 0.1f),
+                                new PointF(b.X + s * 0.6f, b.Y + s * 0.9f), new PointF(b.X + s * 0.44f, b.Y + s * 0.58f),
+                            });
+                            g.DrawPath(pen, path);
+                        }
+                        g.DrawLine(pen, b.X + s * 0.44f, b.Y + s * 0.58f, b.X + s * 0.9f, b.Y + s * 0.1f);
+                        break;
                     case Glyph.Palette:
                         g.DrawEllipse(pen, RectangleF.Inflate(b, -s * 0.08f, -s * 0.08f));
                         float spot = s * 0.17f;
@@ -1852,7 +1881,7 @@ namespace KnightSight
     // Hover fades in and a press sinks it a little, both as transitions over Motion.Control.
     class SoftButton : Control
     {
-        public bool Primary, Blank, Outline, OnGround;
+        public bool Primary, Blank, Outline, OnGround, Selected;
         public Color Fill = Color.Empty, Tint = Color.Empty;
         public float Square;
         public float Radius;
@@ -1915,7 +1944,13 @@ namespace KnightSight
             g.Clear(under);
             Color fill, ink;
             float t = Motion.Ease(lit);
-            if (tinted) Tinted(t, out fill, out ink);
+            var ring = Color.Empty;
+            if (Selected && Enabled)
+            {
+                SelectedLook(Tint, out fill, out ring, out ink);
+                fill = Motion.Mix(fill, tinted ? Color.White : Theme.Accent, 0.12f * t);
+            }
+            else if (tinted) Tinted(t, out fill, out ink);
             else if (Blank) { fill = Motion.Mix(under, Theme.Hover, t); ink = Motion.Mix(Theme.Secondary, Theme.Text, t); }
             else if (!Enabled) { fill = Theme.Surface2; ink = Theme.Muted; }
             else if (!Fill.IsEmpty) { fill = Motion.Mix(Fill, Color.White, 0.2f * t); ink = Theme.AccentInk; }
@@ -1928,10 +1963,14 @@ namespace KnightSight
             using (var path = Theme.Rounded(r, Radius * scale))
             {
                 using (var brush = new SolidBrush(fill)) g.FillPath(brush, path);
+                if (!ring.IsEmpty)
+                    using (var inner = InnerRing(r, scale))
+                    using (var edge = new Pen(ring, 2 * K))
+                        g.DrawPath(edge, inner);
                 if (Outline && Enabled)
-                    using (var edge = new Pen(tinted ? Theme.AccentInk : Theme.Accent, (tinted ? 2 : 1.5f) * K)) g.DrawPath(edge, path);
+                    using (var edge = new Pen(tinted ? Motion.Mix(Tint, Color.Black, 0.45f) : Theme.Accent, 1.5f * K)) g.DrawPath(edge, path);
                 if (Focused && ShowFocusCues)
-                    using (var ring = new Pen(tinted ? Theme.AccentInk : Theme.Accent, 2 * K)) g.DrawPath(ring, path);
+                    using (var focus = new Pen(tinted ? Theme.AccentInk : Theme.Accent, 2 * K)) g.DrawPath(focus, path);
             }
 
             float icon = Icon == Glyph.None ? 0 : 16 * K * scale, gap = Text.Length > 0 && icon > 0 ? 8 * K : 0;
@@ -1960,8 +1999,13 @@ namespace KnightSight
             }
         }
 
-        // As on the web pinboard's coloured bar: light buttons mixed from the bar's colour, the
-        // chosen one dark with the colour as its ink.
+        // A ring drawn inside the edge, so its full width shows.
+        GraphicsPath InnerRing(RectangleF r, float scale)
+        {
+            return Theme.Rounded(RectangleF.Inflate(r, -K, -K), Math.Max(0, Radius * scale - K));
+        }
+
+        // As on the web pinboard's coloured bar: light buttons mixed from the bar's colour.
         void Tinted(float t, out Color fill, out Color ink)
         {
             ink = Theme.AccentInk;
@@ -1971,12 +2015,26 @@ namespace KnightSight
                 fill = Motion.Mix(Tint, Color.White, 0.7f);
                 ink = Motion.Mix(Theme.AccentInk, fill, 0.55f);
             }
-            else if (Primary)
+            else fill = Motion.Mix(Plain(Tint), Color.White, (Outline ? 0.2f : 0) + 0.2f * t);
+        }
+
+        public static Color Plain(Color tint) { return Motion.Mix(tint, Color.White, 0.45f); }
+
+        // The chosen one of a row, as calm as the others and set apart by a ring: on a coloured
+        // bar its colour's palest tint ringed in its dark shade, on the plain card a hint of the
+        // accent ringed in it, darker on a light theme where yellow on white would not show.
+        public static void SelectedLook(Color tint, out Color fill, out Color ring, out Color ink)
+        {
+            if (tint.IsEmpty)
             {
-                fill = Motion.Mix(Theme.AccentInk, Color.FromArgb(57, 57, 57), t);
-                ink = Tint;
+                fill = Motion.Mix(Theme.Surface2, Theme.Accent, Theme.Dark ? 0.18f : 0.28f);
+                ring = Theme.Dark ? Theme.Accent : Motion.Mix(Theme.Accent, Color.Black, 0.45f);
+                ink = Theme.Text;
+                return;
             }
-            else fill = Motion.Mix(Tint, Color.White, (Outline ? 0.65f : 0.45f) + 0.2f * t);
+            fill = Motion.Mix(tint, Color.White, 0.82f);
+            ring = Motion.Mix(tint, Color.Black, 0.45f);
+            ink = Motion.Mix(tint, Color.Black, 0.6f);
         }
 
         // The width the content needs with Pad on either side.
@@ -2200,11 +2258,13 @@ namespace KnightSight
         }
     }
 
-    // What Done hands to the assistant, in the fields of the reply to "notes".
+    // What Send or All good hands to the assistant, in the fields of the reply to "notes".
     class Round
     {
         public int Number;
         public Dictionary<string, object> Fields;
+        // Notes that stay behind, for an approval sent without them.
+        public bool KeepsNotes;
         // The elements under the marks by label, in the person's words, for the saved page.
         public Dictionary<string, string> Places = new Dictionary<string, string>();
     }
@@ -2245,12 +2305,14 @@ namespace KnightSight
         }
 
         // The shot is the share at its full size, so a mark at density 1.5 sits at one and a
-        // half times its place in it.
-        public Round Seal(Bitmap shot, float density, string title, DateTime when)
+        // half times its place in it. An approval says the person signs off what they see, and
+        // may leave the notes on the pinboard out of it.
+        public Round Seal(Bitmap shot, float density, string title, DateTime when, bool approved = false, bool withNotes = true)
         {
             double scale = Panel.Scale(shot.Size);
             int w = Math.Max(1, (int)Math.Round(shot.Width * scale)), h = Math.Max(1, (int)Math.Round(shot.Height * scale));
             var notes = new List<object>();
+            var going = withNotes ? Notes : new List<Note>();
             using (var frame = new Bitmap(w, h))
             {
                 using (var g = Graphics.FromImage(frame))
@@ -2259,19 +2321,20 @@ namespace KnightSight
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                     g.DrawImage(shot, 0, 0, w, h);
                     float k = Math.Max(1, (float)scale * density);
-                    foreach (var note in Notes)
+                    foreach (var note in going)
                         for (int i = 0; i < note.Marks.Count; i++)
                             Pins.Draw(g, note.Kind, note.Label(i), InPicture(note.Marks[i].Box, density, scale), k, false);
                 }
-                foreach (var note in Notes) notes.Add(Describe(note, shot, density, scale));
+                foreach (var note in going) notes.Add(Describe(note, shot, density, scale));
                 var fields = new Dictionary<string, object>
                 {
                     { "round", rounds + 1 },
                     { "sent", when.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture) },
                     { "title", title }, { "width", w }, { "height", h }, { "image", Png(frame) }, { "notes", notes },
                 };
-                var round = new Round { Number = rounds + 1, Fields = fields };
-                foreach (var note in Notes)
+                if (approved) fields["approved"] = true;
+                var round = new Round { Number = rounds + 1, Fields = fields, KeepsNotes = !withNotes };
+                foreach (var note in going)
                     for (int i = 0; i < note.Marks.Count; i++)
                         if (note.Marks[i].Element != null) round.Places[note.Label(i)] = note.Marks[i].Element.Shown;
                 return round;
@@ -2342,7 +2405,7 @@ namespace KnightSight
                 read = false;
                 rounds = round.Number;
             }
-            Notes.Clear();
+            if (!round.KeepsNotes) Notes.Clear();
             Open = false;
         }
 
@@ -2374,10 +2437,12 @@ namespace KnightSight
                 .Append("figure { margin: 12px 0; } figcaption { color: #6f6f6f; font-size: 13px; font-weight: 600; }\n")
                 .Append(".meta { color: #6f6f6f; font-size: 13px; }\n")
                 .Append(".kind { display: inline-block; padding: 1px 8px; border-radius: 5px; color: #161616; font-size: 13px; font-weight: 600; margin-right: 8px; }\n")
+                .Append(".approved { display: inline-block; padding: 6px 14px; border-radius: 6px; background: #42be65; color: #161616; font-weight: 600; }\n")
                 .Append("@media (prefers-color-scheme: dark) { body { background: #161616; color: #f4f4f4; } article { background: #262626; } .meta { color: #8d8d8d; } }\n")
                 .Append("</style>\n<h1>").Append(e(Say.NotesOn((string)f["title"]))).Append("</h1>\n<p class=\"meta\">")
-                .Append(e(Say.Round(round.Number) + ", " + sent.ToString("g", CultureInfo.CurrentCulture))).Append("</p>\n")
-                .Append("<img src=\"data:image/png;base64,").Append(f["image"]).Append("\" alt=\"\">\n");
+                .Append(e(Say.Round(round.Number) + ", " + sent.ToString("g", CultureInfo.CurrentCulture))).Append("</p>\n");
+            if (f.ContainsKey("approved")) page.Append("<p class=\"approved\">").Append(e(Say.Approval)).Append("</p>\n");
+            page.Append("<img src=\"data:image/png;base64,").Append(f["image"]).Append("\" alt=\"\">\n");
             foreach (Dictionary<string, object> note in (IEnumerable<object>)f["notes"])
             {
                 int kind = Array.IndexOf(Note.Keys, (string)note["kind"]);
@@ -2798,7 +2863,7 @@ namespace KnightSight
                 b.K = k;
             }
             saveFile.Text = Say.SaveFile;
-            done.Text = Say.Done;
+            done.Text = Say.Send;
             saveFile.Click += (o, e) => SaveFile();
             done.Click += (o, e) => Done();
             Controls.AddRange(new Control[] { close, rows, saveFile, done });
@@ -2893,13 +2958,14 @@ namespace KnightSight
         readonly float k;
         readonly SoftButton mark = new SoftButton { Icon = Glyph.Mark, Tail = "N" }, pin = new SoftButton { Icon = Glyph.Pin, Tail = "P" },
             area = new SoftButton { Icon = Glyph.Region, Tail = "B" }, notes = new SoftButton { Icon = Glyph.Notes, Tail = "0" },
-            done = new SoftButton { Icon = Glyph.Done }, palette = new SoftButton { Blank = true, Icon = Glyph.Palette },
+            done = new SoftButton { Icon = Glyph.Send }, approve = new SoftButton { Icon = Glyph.Done },
+            palette = new SoftButton { Blank = true, Icon = Glyph.Palette },
             close = new SoftButton { Blank = true, Icon = Glyph.Close };
         readonly ToolTip tip = new ToolTip();
         readonly Swatches swatches;
         DateTime swatchesClosed;
         public Action<Tool> Chosen;
-        public Action ListToggled, Done, Dismissed;
+        public Action ListToggled, Done, Approve, Dismissed;
         public Func<Keys, bool> Pressed;
         public Tool Tool { get; private set; }
         public int Count { get; private set; }
@@ -2920,7 +2986,8 @@ namespace KnightSight
             x = Put(pin, Say.PinTool, Say.PinTip, buttonFont, x);
             x = Put(area, Say.AreaTool, Say.AreaTip, buttonFont, x);
             x = Put(notes, Say.Notes, Say.NotesTip, buttonFont, x);
-            x = Put(done, Say.Done, Say.DoneTip, buttonFont, x);
+            x = Put(done, Say.Send, Say.DoneTip, buttonFont, x);
+            x = Put(approve, Say.AllGood, Say.AllGoodTip, buttonFont, x);
             x = Put(palette, "", Say.ColourTip, buttonFont, x);
             x = Put(close, "", Say.ClosePinboard, buttonFont, x);
             Size = new Size(x, S(56));
@@ -2937,6 +3004,7 @@ namespace KnightSight
             area.Click += (o, e) => Chosen(Tool.Area);
             notes.Click += (o, e) => ListToggled();
             done.Click += (o, e) => Done();
+            approve.Click += (o, e) => Approve();
             palette.Click += (o, e) => OpenSwatches();
             close.Click += (o, e) => Dismissed();
             Wear(BarColour.Chosen);
@@ -3003,9 +3071,9 @@ namespace KnightSight
         {
             Tool = tool;
             Count = count;
-            mark.Primary = tool == Tool.Mark;
-            pin.Primary = tool == Tool.Pin;
-            area.Primary = tool == Tool.Area;
+            mark.Selected = tool == Tool.Mark;
+            pin.Selected = tool == Tool.Pin;
+            area.Selected = tool == Tool.Area;
             notes.Tail = count.ToString(CultureInfo.CurrentCulture);
             notes.Outline = listOpen;
             done.Enabled = canSend;
@@ -3175,7 +3243,7 @@ namespace KnightSight
         bool reading;
         int hit = -1, part = -1;
         Point pointer;
-        public Action Finish, SaveFile, Closed;
+        public Action Finish, Approve, SaveFile, Closed;
         // The windows whose elements can be marked, topmost first, or null for none.
         public Func<List<IntPtr>> Readable;
 
@@ -3192,6 +3260,7 @@ namespace KnightSight
             editor.KindChanged = () => { if (editing) Render(); };
             editor.Typed = Sync;
             list.Done = bar.Done = () => { KeepOpenNote(); Finish(); };
+            bar.Approve = () => { KeepOpenNote(); Approve(); };
             list.SaveFile = () => { KeepOpenNote(); SaveFile(); };
             list.Dismissed = () => ShowList(false);
             list.Picked = GoTo;
@@ -3825,7 +3894,7 @@ namespace KnightSight
             close.Click += (o, e) => Close();
             pin.Click += (o, e) => TogglePinboard();
             Controls.AddRange(new Control[] { pickWindow, pickRegion, pickScreen, pin, toggle, info, minimise, close });
-            pinboard = new Pinboard(board, k) { Finish = FinishPinboard, SaveFile = SavePinboard, Closed = ClosePinboard };
+            pinboard = new Pinboard(board, k) { Finish = FinishPinboard, Approve = ApprovePinboard, SaveFile = SavePinboard, Closed = ClosePinboard };
             // Readable lists the share's own window first, the pinboard wants its menus on top.
             pinboard.Readable = () =>
             {
@@ -4197,7 +4266,7 @@ namespace KnightSight
 
         // The picture for the notes is taken without the pinboard on it: a window draws itself,
         // and for a region the pinboard steps aside for the copy off the screen.
-        Round Seal(Share s)
+        Round Seal(Share s, bool approved = false, bool withNotes = true)
         {
             Bitmap shot;
             if (s.Window != IntPtr.Zero) shot = CaptureWindow(s.Window);
@@ -4213,7 +4282,7 @@ namespace KnightSight
                 }
                 finally { badgeHeld = false; }
             }
-            using (shot) return board.Seal(shot, Density(s), s.Window != IntPtr.Zero ? Win.Title(s.Window) : s.Title, DateTime.UtcNow);
+            using (shot) return board.Seal(shot, Density(s), s.Window != IntPtr.Zero ? Win.Title(s.Window) : s.Title, DateTime.UtcNow, approved, withNotes);
         }
 
         void FinishPinboard()
@@ -4227,6 +4296,30 @@ namespace KnightSight
             board.Send(round);
             pinboard.Hide();
             sentNote = Say.Sent(count);
+            fetchedShown = false;
+            ShowState();
+        }
+
+        // Asked once when notes are on the pinboard, since an approval with open notes may mean
+        // either.
+        void ApprovePinboard()
+        {
+            var c = chosen;
+            if (c == null) return;
+            bool along = false;
+            if (board.Notes.Count > 0)
+            {
+                var answer = MessageBox.Show(pinboard.Bar, Say.SendAlong, Say.AllGood, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (answer == DialogResult.Cancel) return;
+                along = answer == DialogResult.Yes;
+            }
+            int count = along ? board.Notes.Count : 0;
+            Round round;
+            try { round = Seal(c, true, along); }
+            catch (Refused) { System.Media.SystemSounds.Beep.Play(); return; }
+            board.Send(round);
+            pinboard.Hide();
+            sentNote = Say.Approved(count);
             fetchedShown = false;
             ShowState();
         }

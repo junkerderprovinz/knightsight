@@ -112,6 +112,20 @@ test('names the element a mark sits on and the way to it', async () => {
   });
 });
 
+test('puts an approval at the top, also without notes', async () => {
+  const approved = { ok: true, round: 3, sent: '2026-11-18T09:00:00Z', title: 'Preview', width: 800, height: 600, image: PNG, approved: true, notes: [] };
+  await session(() => approved, async (c) => {
+    const { result } = await c.call('tools/call', { name: 'pinboard', arguments: {} });
+    assert.match(result.content[0].text, /^Approved: everything fits\. The person looked at the preview and signed it off\.\nRound 3/);
+    assert.equal(result.content.length, 2);
+  });
+  await session(() => ({ ...ROUND, approved: true }), async (c) => {
+    const { result } = await c.call('tools/call', { name: 'pinboard', arguments: {} });
+    assert.match(result.content[0].text, /^Approved: everything fits\. The person looked at the preview and signed it off, with the notes below\./);
+    assert.match(result.content[0].text, /^3\. Bug, from Junker/m);
+  });
+});
+
 test('waits for a round not read yet', async () => {
   const answer = (request, n) => (n < 3 ? { ok: true, round: 1 } : ROUND);
   await session(answer, async (c, seen) => {
