@@ -2165,6 +2165,8 @@ namespace KnightSight
     {
         public int Number;
         public Dictionary<string, object> Fields;
+        // The elements under the marks by label, in the person's words, for the saved page.
+        public Dictionary<string, string> Places = new Dictionary<string, string>();
     }
 
     // The notes on the pinboard and the round sent last. The notes belong to the panel's
@@ -2228,7 +2230,11 @@ namespace KnightSight
                     { "sent", when.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture) },
                     { "title", title }, { "width", w }, { "height", h }, { "image", Png(frame) }, { "notes", notes },
                 };
-                return new Round { Number = rounds + 1, Fields = fields };
+                var round = new Round { Number = rounds + 1, Fields = fields };
+                foreach (var note in Notes)
+                    for (int i = 0; i < note.Marks.Count; i++)
+                        if (note.Marks[i].Element != null) round.Places[note.Label(i)] = note.Marks[i].Element.Shown;
+                return round;
             }
         }
 
@@ -2344,8 +2350,15 @@ namespace KnightSight
                 foreach (Dictionary<string, object> mark in marks)
                 {
                     var picture = "<img src=\"data:image/png;base64," + mark["image"] + "\" alt=\"\">";
-                    if (marks.Count == 1) page.Append(picture).Append("\n");
-                    else page.Append("<figure>").Append(picture).Append("<figcaption>").Append(e(mark["label"])).Append("</figcaption></figure>\n");
+                    string place;
+                    round.Places.TryGetValue((string)mark["label"], out place);
+                    if (marks.Count > 1)
+                        page.Append("<figure>").Append(picture).Append("<figcaption>").Append(e(mark["label"] + (place != null ? ", " + place : ""))).Append("</figcaption></figure>\n");
+                    else
+                    {
+                        page.Append(picture).Append("\n");
+                        if (place != null) page.Append("<p class=\"meta\">").Append(e(place)).Append("</p>\n");
+                    }
                 }
                 page.Append("</article>\n");
             }
@@ -2751,7 +2764,6 @@ namespace KnightSight
             DoubleBuffered = true;
             Edged = true;
             Instant = true;
-            KeyPreview = true;
             titleFont = new Font(Theme.SemiBold, 15 * k, GraphicsUnit.Pixel);
             countFont = new Font(Theme.Regular, 14 * k, GraphicsUnit.Pixel);
             var buttonFont = new Font(Theme.SemiBold, 14 * k, GraphicsUnit.Pixel);
@@ -2784,10 +2796,9 @@ namespace KnightSight
 
         protected override bool ShowWithoutActivation { get { return true; } }
 
-        protected override void OnKeyDown(KeyEventArgs e)
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (Pressed(e.KeyData)) e.Handled = true;
-            base.OnKeyDown(e);
+            return Pressed(keyData) || base.ProcessCmdKey(ref msg, keyData);
         }
 
         public void Fill(List<Note> notes)

@@ -456,6 +456,18 @@ namespace KnightSight
             True(json.Contains("\"element\":{\"type\":\"button\",\"name\":\"Save\",\"path\":"), json.Substring(json.IndexOf("\"marks\""), 200));
         }
 
+        static void SavedPageSaysWhichElementEachMarkSitsOn()
+        {
+            var board = BoardWith();
+            board.Add(new[] { new Mark(new RectangleF(10, 10, 20, 20), SaveButton()), new Mark(new RectangleF(60, 60, 0, 0)) }, NoteKind.Bug, "Does nothing", "");
+            board.Add(new[] { new Mark(new RectangleF(40, 40, 10, 10), SaveButton()) }, NoteKind.Wish, "Bigger", "");
+            string page;
+            using (var bmp = new Bitmap(100, 100)) page = Board.Page(board.Seal(bmp, 1, "t", DateTime.UtcNow));
+            True(page.Contains("<figcaption>1a, button &quot;Save&quot; in Quest Log</figcaption>"), "the label carries the element");
+            True(page.Contains("<figcaption>1b</figcaption>"), "a pin keeps its bare label");
+            True(page.Contains("<p class=\"meta\">button &quot;Save&quot; in Quest Log</p>"), "a single mark names its element under the picture");
+        }
+
         static void NoteCardSaysWhereItsMarksSit()
         {
             var element = new Mark(new RectangleF(10, 10, 20, 20), SaveButton());
