@@ -70,6 +70,12 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="1.1.1" date="2026-11-18">
+      <description>
+        <p>Escape no longer closes the pinboard on Windows, it puts the tool down and lets the mouse through to the shared window. KnightSight comes back to the front after you pick a window or a region, and the stop button pulses while you share.</p>
+      </description>
+      <url type="details">https://github.com/junkerderprovinz/knightsight/releases/tag/v1.1.1</url>
+    </release>
     <release version="1.1.0" date="2026-11-18">
       <description>
         <p>The pinboard: while you share, mark controls, pins or areas of the share, write a note to them and send them to your assistant, or tell it everything fits. A look lists the controls inside the share, a Screen button shares a whole monitor, a yellow pointer shows where your assistant acts on X11, and a new panel shows the share as a small live picture.</p>
