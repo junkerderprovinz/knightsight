@@ -1880,13 +1880,13 @@ namespace KnightSight
     // blank control whose square lights up under the pointer. Fill, when set, paints it in a
     // colour of its own, such as the kind of a note. Tail is a small chip after the text, for a
     // key or a count. OnGround sits it on the window's ground instead of a card, Tint on a bar
-    // of that colour.
+    // of that colour. Glow, from 0 to 1, tints an outlined button with the accent.
     // Hover fades in and a press sinks it a little, both as transitions over Motion.Control.
     class SoftButton : Control
     {
         public bool Primary, Blank, Outline, OnGround, Selected;
         public Color Fill = Color.Empty, Tint = Color.Empty;
-        public float Square;
+        public float Square, Glow;
         public float Radius;
         public Glyph Icon;
         public string Tail = "";
@@ -1957,7 +1957,7 @@ namespace KnightSight
             else if (Blank) { fill = Motion.Mix(under, Theme.Hover, t); ink = Motion.Mix(Theme.Secondary, Theme.Text, t); }
             else if (!Enabled) { fill = Theme.Surface2; ink = Theme.Muted; }
             else if (!Fill.IsEmpty) { fill = Motion.Mix(Fill, Color.White, 0.2f * t); ink = Theme.AccentInk; }
-            else if (Outline) { fill = Motion.Mix(Theme.Surface2, Theme.Surface3, t); ink = Theme.Text; }
+            else if (Outline) { fill = Motion.Mix(Motion.Mix(Theme.Surface2, Theme.Surface3, t), Theme.Accent, 0.28f * Glow); ink = Theme.Text; }
             else if (Primary) { fill = Motion.Mix(Theme.Accent, Theme.AccentHover, t); ink = Theme.AccentInk; }
             else { fill = Motion.Mix(Theme.Surface2, Theme.Surface3, t); ink = Theme.Text; }
             float scale = 1 - (1 - Motion.PressScale) * Motion.Ease(sink);
@@ -2582,7 +2582,6 @@ namespace KnightSight
             StartPosition = FormStartPosition.Manual;
             BackColor = Theme.Surface;
             DoubleBuffered = true;
-            Edged = true;
             Instant = true;
             titleFont = new Font(Theme.SemiBold, 15 * k, GraphicsUnit.Pixel);
             hintFont = new Font(Theme.Regular, 13 * k, GraphicsUnit.Pixel);
@@ -2846,7 +2845,6 @@ namespace KnightSight
             StartPosition = FormStartPosition.Manual;
             BackColor = Theme.Surface;
             DoubleBuffered = true;
-            Edged = true;
             Instant = true;
             titleFont = new Font(Theme.SemiBold, 15 * k, GraphicsUnit.Pixel);
             countFont = new Font(Theme.Regular, 14 * k, GraphicsUnit.Pixel);
@@ -4175,6 +4173,8 @@ namespace KnightSight
                 {
                     picking = false;
                     Choose(Share.Of(h));
+                    // The click that picked the window brought it to the front, over the panel.
+                    Win.Activate(Handle);
                 }
             }
             buttonWasDown = down;
@@ -4198,7 +4198,8 @@ namespace KnightSight
                 var r = picker.Result;
                 if (!r.IsEmpty) Choose(new Share { Region = r, Screen = picker is ScreenPicker, Title = title(r) });
                 Show();
-                Activate();
+                // Once the picker is gone Windows hands the front to the window under it.
+                Win.Activate(Handle);
                 ShowState();
             };
             picker.Show();
@@ -4380,6 +4381,14 @@ namespace KnightSight
             }
             else corners = cornersTo;
             if (moving || lit != litTo) Invalidate(Rectangle.Ceiling(Finder));
+
+            // The stop button breathes while the share is open, with reduced motion it holds a steady tint.
+            float glow = !active ? 0 : moving ? 0.5f - 0.5f * (float)Math.Cos(2 * Math.PI * (now.Ticks / 10000 % 2400) / 2400) : 0.5f;
+            if (glow != toggle.Glow)
+            {
+                toggle.Glow = glow;
+                toggle.Invalidate();
+            }
 
             var c = chosen;
             if (c == null) { frame.Hide(); HideBadge(); return; }

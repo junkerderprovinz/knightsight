@@ -6,7 +6,16 @@ Every release is written by hand. The full notes for each release are in
 
 ## v1.1.1 (2026-11-18)
 
-The pinboard stays put when you stop marking.
+The pinboard stays put when you stop marking, and KnightSight comes back to the front once you pick what to share.
+
+## 🎨 Design
+
+- **The stop button breathes while you share.** A soft pulse in the accent colour shows the share is open. With reduced motion it keeps a steady tint.
+- **The note card and the note list have no edge line**, only their shadow.
+
+## ⚡ Improved
+
+- **KnightSight comes back after a pick.** Once you click a window or draw a region, the panel returns to the front, so Start sharing is right there.
 
 ## 🐛 Fixed
 
