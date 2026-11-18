@@ -43,7 +43,7 @@ Add-Type -TypeDefinition ((Get-Content -Raw -Encoding UTF8 $sources) -join "`n")
 $sizes = 16, 24, 32, 48, 64, 256
 $images = foreach ($size in $sizes) {
     $ms = New-Object System.IO.MemoryStream
-    ([KnightSight.Logo]::Render($size)).Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    ([KnightSight.Logo]::RenderIcon($size)).Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
     , $ms.ToArray()
 }
 $ico = Join-Path $work 'knightsight.ico'

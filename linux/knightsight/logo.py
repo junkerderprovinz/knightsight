@@ -13,7 +13,7 @@ from .logo_shapes import HEIGHT, SHAPES, WIDTH
 
 OVERSAMPLING = 4
 # The app icons keep some air around the mark, as the GNOME icon grid expects.
-ICON_MARGIN = 0.06
+ICON_MARGIN = 0.08
 
 _drawn = {}
 

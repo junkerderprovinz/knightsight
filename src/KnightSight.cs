@@ -1564,13 +1564,19 @@ namespace KnightSight
             public Drawing(float width, float height, Shape[] shapes) { Width = width; Height = height; Shapes = shapes; }
         }
 
-        public static Bitmap Render(int size)
+        // The app icons keep some air around the ring, which would otherwise look larger than the
+        // icons beside it. The same share as on Linux.
+        public const float IconMargin = 0.08f;
+
+        public static Bitmap RenderIcon(int size) { return Render(size, IconMargin); }
+
+        public static Bitmap Render(int size, float margin = 0)
         {
             using (var large = new Bitmap(size * Oversampling, size * Oversampling))
             {
                 using (var g = Graphics.FromImage(large))
                 {
-                    float scale = large.Width / Math.Max(Bare.Width, Bare.Height);
+                    float scale = large.Width * (1 - 2 * margin) / Math.Max(Bare.Width, Bare.Height);
                     g.TranslateTransform((large.Width - Bare.Width * scale) / 2, (large.Height - Bare.Height * scale) / 2);
                     g.ScaleTransform(scale, scale);
                     foreach (var shape in Bare.Shapes)
@@ -1642,7 +1648,7 @@ namespace KnightSight
 
         public static Icon MakeIcon(int size)
         {
-            using (var bmp = Render(size))
+            using (var bmp = RenderIcon(size))
             {
                 var handle = bmp.GetHicon();
                 var icon = (Icon)System.Drawing.Icon.FromHandle(handle).Clone();

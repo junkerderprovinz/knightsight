@@ -6,7 +6,11 @@ Every release is written by hand. The full notes for each release are in
 
 ## v1.1.2 (2026-11-19)
 
-KnightSight tells you which version you are running.
+KnightSight tells you which version you are running, and its icon sits a little smaller.
+
+## 🎨 Design
+
+- **The app icon has room to breathe.** It keeps a little transparent margin, so it no longer looks larger than the icons beside it.
 
 ## ⚡ Improved
 

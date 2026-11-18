@@ -492,6 +492,18 @@ namespace KnightSight
             Same(Say.Spots(3) + ": button \"Save\", " + Say.PinSpot + ", " + Say.AreaSpot(new SizeF(160, 40)), Mark.Describe(new[] { element, pin, box }));
         }
 
+        static void AppIconKeepsAirAroundTheMark()
+        {
+            using (var icon = Logo.RenderIcon(256))
+            {
+                int air = (int)(256 * Logo.IconMargin) - 1;
+                for (int i = 0; i < 256; i++)
+                    for (int j = 0; j < air; j++)
+                        foreach (var p in new[] { new Point(i, j), new Point(j, i), new Point(i, 255 - j), new Point(255 - j, i) })
+                            if (icon.GetPixel(p.X, p.Y).A != 0) throw new Exception("ink at " + p);
+            }
+        }
+
         static void ExeCarriesTheVersionThePanelShows()
         {
             var info = FileVersionInfo.GetVersionInfo(Assembly.GetEntryAssembly().Location);
