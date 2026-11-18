@@ -4,6 +4,14 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## v1.1.2 (2026-11-19)
+
+KnightSight tells you which version you are running.
+
+## ⚡ Improved
+
+- **The version is in sight.** On Windows the panel's title bar shows it next to the name, and the properties of KnightSight.exe list it as file and product version.
+
 ## v1.1.1 (2026-11-18)
 
 The pinboard stays put when you stop marking, and KnightSight comes back to the front once you pick what to share.

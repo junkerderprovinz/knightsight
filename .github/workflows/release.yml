@@ -35,6 +35,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Check that the version matches the tag
+        shell: bash
+        run: |
+          set -eu
+          version=$(sed -n 's/.*const string Version = "\(.*\)";.*/\1/p' src/KnightSight.cs)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::KnightSight.cs says $version, the tag says $GITHUB_REF_NAME"
+            exit 1
+          fi
+
       - name: Build KnightSight.exe
         shell: powershell
         run: .\build.ps1

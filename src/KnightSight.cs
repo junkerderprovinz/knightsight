@@ -19,8 +19,21 @@ using System.Web.Script.Serialization;
 using System.Windows.Automation;
 using System.Windows.Forms;
 
+[assembly: System.Reflection.AssemblyTitle("KnightSight")]
+[assembly: System.Reflection.AssemblyProduct("KnightSight")]
+[assembly: System.Reflection.AssemblyVersion(KnightSight.About.Version)]
+[assembly: System.Reflection.AssemblyFileVersion(KnightSight.About.Version)]
+[assembly: System.Reflection.AssemblyInformationalVersion(KnightSight.About.Version)]
+
 namespace KnightSight
 {
+    // The version in the file's properties and on the panel. The release workflow holds it
+    // against the tag.
+    static class About
+    {
+        public const string Version = "1.1.2";
+    }
+
     static class Native
     {
         [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
@@ -3970,6 +3983,9 @@ namespace KnightSight
             var finder = Finder;
             DrawFinder(g, finder);
             float side = finder.Right + S(28), sideWidth = card.Right - S(24) - side;
+            using (var muted = new SolidBrush(Theme.Muted))
+            using (var format = new StringFormat { LineAlignment = StringAlignment.Center })
+                g.DrawString("KnightSight " + About.Version, tipFont, muted, new RectangleF(card.X + S(4), 0, S(240), card.Y), format);
             Logo.Draw(g, side, card.Y + S(24), S(32));
             var head = new RectangleF(side + S(44), card.Y + S(28), sideWidth - S(44), S(26));
             var sub = new RectangleF(side + S(18), card.Y + S(66), sideWidth - S(18), S(20));

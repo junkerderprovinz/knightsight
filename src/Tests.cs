@@ -492,6 +492,14 @@ namespace KnightSight
             Same(Say.Spots(3) + ": button \"Save\", " + Say.PinSpot + ", " + Say.AreaSpot(new SizeF(160, 40)), Mark.Describe(new[] { element, pin, box }));
         }
 
+        static void ExeCarriesTheVersionThePanelShows()
+        {
+            var info = FileVersionInfo.GetVersionInfo(Assembly.GetEntryAssembly().Location);
+            Same(About.Version, info.ProductVersion);
+            Same(About.Version, info.FileVersion);
+            Same("KnightSight", info.ProductName);
+        }
+
         static void PinboardStartsWithMarking()
         {
             Same(Tool.Mark, new Pinboard(new Board(), 1).Bar.Tool);
