@@ -510,6 +510,26 @@ namespace KnightSight
             Same(Tool.Mark, pinboard.Bar.Tool);
         }
 
+        static void EscapePutsTheToolDownAndKeepsThePinboard()
+        {
+            var pinboard = new Pinboard(new Board(), 1);
+            bool closed = false;
+            pinboard.Closed = () => closed = true;
+            True(pinboard.Key(Keys.Escape), "Escape is taken");
+            Same(Tool.None, pinboard.Bar.Tool);
+            pinboard.Key(Keys.Escape);
+            True(!closed, "the pinboard stays open");
+        }
+
+        static void PickingTheChosenToolAgainPutsItDown()
+        {
+            var pinboard = new Pinboard(new Board(), 1);
+            pinboard.Key(Keys.N);
+            Same(Tool.None, pinboard.Bar.Tool);
+            pinboard.Key(Keys.P);
+            Same(Tool.Pin, pinboard.Bar.Tool);
+        }
+
         static void ArrowsWalkOnlyWhileAnElementIsLit()
         {
             True(!new Pinboard(new Board(), 1).Key(Keys.Up), "nothing to walk from");

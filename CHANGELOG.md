@@ -4,6 +4,14 @@ Every release is written by hand. The full notes for each release are in
 [`.github/release-notes/`](.github/release-notes/) and on the
 [releases page](https://github.com/junkerderprovinz/knightsight/releases).
 
+## v1.1.1 (2026-11-18)
+
+The pinboard stays put when you stop marking.
+
+## 🐛 Fixed
+
+- **Escape no longer closes the pinboard on Windows.** It closes an open note or puts the tool down, the same as clicking the chosen tool again. With no tool in hand your notes stay on the share and the mouse reaches the window under them, so you can click around and scroll between notes. A click on a note's badge still opens it, and a tool on the bar picks up where you left off. The close button on the bar closes the pinboard.
+
 ## v1.1.0 (2026-11-18)
 
 A pinboard to mark spots for your assistant, controls in every look and a pointer that shows where it acts.

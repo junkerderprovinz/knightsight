@@ -2165,8 +2165,9 @@ namespace KnightSight
 
         public static Color Of(NoteKind kind) { return Colors[(int)kind]; }
 
-        // A rectangle of no size on the screen is a pin.
-        public static void Draw(Graphics g, NoteKind kind, string label, Rectangle r, float k, bool lit)
+        // A rectangle of no size on the screen is a pin. A hollow box lets clicks through to the
+        // window under the pinboard, as a layered window passes them on where it is clear.
+        public static void Draw(Graphics g, NoteKind kind, string label, Rectangle r, float k, bool lit, bool hollow = false)
         {
             var color = Of(kind);
             if (r.Width == 0 && r.Height == 0)
@@ -2174,7 +2175,8 @@ namespace KnightSight
                 Badge(g, label, r.Location, 24 * k, color, Color.White, k, true);
                 return;
             }
-            using (var fill = new SolidBrush(Color.FromArgb(36, color))) g.FillRectangle(fill, r);
+            if (!hollow)
+                using (var fill = new SolidBrush(Color.FromArgb(36, color))) g.FillRectangle(fill, r);
             using (var pen = new Pen(color, (lit ? 3 : 2) * k)) g.DrawRectangle(pen, r);
             Badge(g, label, r.Location, 22 * k, color, Color.White, k, false);
         }
@@ -2922,7 +2924,8 @@ namespace KnightSight
         }
     }
 
-    enum Tool { Mark, Pin, Area }
+    // With no tool in hand the pinboard stays on the share but lets the mouse through to it.
+    enum Tool { None, Mark, Pin, Area }
 
     // The colours the pinboard's bar can wear, the same as the web pinboard's. Grey is the card
     // of the theme, the others make the bar easy to find over a busy window.
@@ -3316,11 +3319,13 @@ namespace KnightSight
             return -1;
         }
 
-        // While marking elements only a badge opens its note, so the elements inside a box stay free.
+        // While marking elements, or with no tool, only a badge opens its note, so what lies inside
+        // a box stays free.
         Note NoteAt(Point screen)
         {
+            bool boxes = tool == Tool.Pin || tool == Tool.Area;
             for (int i = board.Notes.Count - 1; i >= 0; i--)
-                if (MarkAt(MarksOf(board.Notes[i]), screen, tool != Tool.Mark) >= 0) return board.Notes[i];
+                if (MarkAt(MarksOf(board.Notes[i]), screen, boxes) >= 0) return board.Notes[i];
             return null;
         }
 
@@ -3380,10 +3385,12 @@ namespace KnightSight
             parts = null;
             hit = part = -1;
             fresh = true;
+            if (tool == Tool.None) Choose(Tool.Mark);
         }
 
-        // The pinboard's keys wherever its focus is: N, P and B pick the tool, the arrows walk from
-        // an element out to the one around it and back.
+        // The pinboard's keys wherever its focus is: N, P and B pick the tool or put it down again,
+        // Escape closes the note or puts the tool down, the arrows walk from an element out to the
+        // one around it and back. Only the bar's close button closes the pinboard.
         public bool Key(Keys key)
         {
             switch (key)
@@ -3395,7 +3402,8 @@ namespace KnightSight
                 case Keys.Down: return Climb(false);
                 case Keys.Escape:
                     if (editing) CloseNote();
-                    else Closed();
+                    else if (tool != Tool.None) Choose(tool);
+                    else return false;
                     return true;
                 default: return false;
             }
@@ -3403,7 +3411,7 @@ namespace KnightSight
 
         void Choose(Tool chosen)
         {
-            tool = chosen;
+            tool = tool == chosen ? Tool.None : chosen;
             hit = part = -1;
             down = null;
             draft = Rectangle.Empty;
@@ -3499,7 +3507,7 @@ namespace KnightSight
             using (var g = Graphics.FromImage(picture))
             {
                 Theme.Prepare(g);
-                g.Clear(Color.FromArgb(20, 0, 0, 0));
+                g.Clear(tool == Tool.None ? Color.Transparent : Color.FromArgb(20, 0, 0, 0));
                 g.TranslateTransform(-area.X, -area.Y);
                 foreach (var note in board.Notes)
                     if (!editing || editor.Note != note) DrawMarks(g, note.Kind, note.Number, note.Marks, note == hover || note == flash, note == flash);
@@ -3524,7 +3532,7 @@ namespace KnightSight
                 if (!Spot.Shows(those[i].Box, area, density)) continue;
                 var r = OnScreen(those[i].Box);
                 if (flashing) Halo(g, kind, r);
-                Pins.Draw(g, kind, Note.Label(number, i, those.Count), r, k, lit);
+                Pins.Draw(g, kind, Note.Label(number, i, those.Count), r, k, lit, tool == Tool.None);
             }
         }
 
@@ -3657,7 +3665,7 @@ namespace KnightSight
             }
             Aim(p);
             var over = NoteAt(p);
-            overlay.Cursor = over != null ? Cursors.Hand : Cursors.Cross;
+            overlay.Cursor = over != null ? Cursors.Hand : tool == Tool.None ? Cursors.Default : Cursors.Cross;
             if (over == hover) return;
             hover = over;
             Render();
