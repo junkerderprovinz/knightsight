@@ -76,7 +76,8 @@ jobs:
         run: |
           set -eu
           mkdir -p dist
-          cp artifacts/* mcp/knightsight-mcp.mjs dist/
+          # A failed smoke test of an earlier attempt leaves its screenshots among the artifacts.
+          cp artifacts/*.exe artifacts/*.zip artifacts/*.flatpak mcp/knightsight-mcp.mjs dist/
           (cd dist && sha256sum * > checksums.txt)
           cat dist/checksums.txt
 
