@@ -215,7 +215,7 @@ async function viaDesk(msg, d) {
   }
   try {
     const reply = await exchange(net.connect(port, '127.0.0.1'), msg);
-    return reply ?? { ok: false, error: `${NOT_RUNNING} It was looked for on ${d.host}.` };
+    return reply ?? { ok: false, absent: true, error: `${NOT_RUNNING} It was looked for on ${d.host}.` };
   } catch (err) {
     return { ok: false, error: `The tunnel to ${d.host} broke off: ${err.message}` };
   }
@@ -229,7 +229,7 @@ const absent = (err) => err.code === 'ENOENT' || err.code === 'ECONNREFUSED';
 async function relay(msg) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return (await exchange(local(), msg)) ?? { ok: false, error: NOT_RUNNING };
+      return (await exchange(local(), msg)) ?? { ok: false, absent: true, error: NOT_RUNNING };
     } catch (err) {
       if (attempt < 20 && (absent(err) || err.code === 'EBUSY')) {
         if (absent(err) && desk()) break;
@@ -241,7 +241,7 @@ async function relay(msg) {
     }
   }
   const d = desk();
-  return d ? viaDesk(msg, d) : { ok: false, error: NOT_RUNNING };
+  return d ? viaDesk(msg, d) : { ok: false, absent: true, error: NOT_RUNNING };
 }
 
 const text = (lines, isError = false) => ({ content: [{ type: 'text', text: lines.join('\n') }], ...(isError ? { isError } : {}) });
@@ -291,6 +291,13 @@ const HOW_TO_PIN =
   'in the KnightSight window, pins notes onto the share and sends them.';
 const KINDS = { bug: 'Bug', wish: 'Wish', question: 'Question' };
 
+// KnightSight keeps a round on disk until it is fetched, so notes sent before it ended are
+// not lost and come with the first call after it runs again.
+function unreachable(reply) {
+  const kept = reply.absent ? ['Notes the person sent before it stopped are kept and come along once KnightSight runs again.'] : [];
+  return text([reply.error, ...kept], true);
+}
+
 function place(mark) {
   const at = mark.pin ? `a pin at ${mark.x}, ${mark.y}` : `${mark.x}, ${mark.y}, ${mark.width} x ${mark.height}`;
   const on = mark.element ? `, on ${mark.element.path}` : '';
@@ -325,14 +332,14 @@ async function notes(args, progress) {
   const wait = Math.min(Math.max(Number(args.wait) || 0, 0), 3600);
   if (!wait) {
     const reply = await relay({ cmd: 'notes' });
-    if (!reply.ok) return text([reply.error], true);
+    if (!reply.ok) return unreachable(reply);
     return reply.notes ? round(reply) : text([`No notes have been sent yet. ${HOW_TO_PIN}`]);
   }
   const started = Date.now();
   const until = started + wait * 1000;
   for (;;) {
     const reply = await relay({ cmd: 'notes', unread: true });
-    if (!reply.ok) return text([reply.error], true);
+    if (!reply.ok) return unreachable(reply);
     if (reply.notes) return round(reply);
     if (Date.now() >= until) return text([`No new notes within ${wait} ${wait === 1 ? 'second' : 'seconds'}. ${HOW_TO_PIN}`]);
     progress?.(Math.round((Date.now() - started) / 100) / 10, wait);

@@ -155,6 +155,18 @@ test('passes a refusal from the panel on as an error', async () => {
   });
 });
 
+test('tells that sent notes wait for KnightSight to run again', async () => {
+  const c = client();
+  try {
+    const { result } = await c.call('tools/call', { name: 'pinboard', arguments: { wait: 30 } });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /KnightSight is not running/);
+    assert.match(result.content[0].text, /kept/);
+  } finally {
+    c.close();
+  }
+});
+
 const SHOT = {
   ok: true, title: 'Quest Log', width: 600, height: 400, image: PNG,
   elements: [
