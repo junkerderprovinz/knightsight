@@ -7,7 +7,7 @@ MISSING = """KnightSight needs Python's GObject bindings with GTK 4 and GStreame
   Debian, Ubuntu:  sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 gstreamer1.0-pipewire
   Fedora:          sudo dnf install python3-gobject gtk4 gstreamer1-plugins-base pipewire-gstreamer
   Arch:            sudo pacman -S python-gobject python-cairo gtk4 gst-plugins-base gst-plugin-pipewire
-or install the Flatpak, which brings all of it along."""
+or take the AppImage or the Flatpak, which bring all of it along."""
 
 
 def main():

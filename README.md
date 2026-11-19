@@ -121,7 +121,7 @@ The app and the quests in these pictures are made up.
 - **One shortcut to stop.** Ctrl+Alt+Shift+X ends the share at once, and so does closing KnightSight.
 - **Minimized is fine.** When your assistant asks for a minimized window, it comes back behind your other windows without taking the focus, so you keep working where you are.
 - **One thing stays out of reach.** A window running as administrator takes no input from KnightSight.
-- **Small and quiet.** One EXE on Windows, one app on macOS, a zip or a Flatpak on Linux. It speaks English, or German when your system does.
+- **Small and quiet.** One EXE on Windows, one app on macOS, a zip, an AppImage or a Flatpak on Linux. It speaks English, or German when your system does.
 
 ### On macOS and Linux
 
@@ -161,6 +161,7 @@ Then ask your assistant to take a look. While nothing is shared, it gets a short
 
 - **macOS:** the app isn't notarized, so the first start needs a nudge. On macOS 13 and 14, Control-click `KnightSight.app` in Finder and choose **Open**. On macOS 15 and newer, open it once, close the warning, then click **Open Anyway** under **System Settings > Privacy & Security**. Allow Screen Recording and Accessibility when you start sharing. After an update macOS may ask for both again.
 - **Linux zip:** unzip it and run `knightsight/bin/knightsight`, or `sh knightsight/install.sh` for a menu entry and a `knightsight` command. It needs GTK 4 and GStreamer with PipeWire from your system, on Debian and Ubuntu `python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 gstreamer1.0-pipewire`. If something is missing, KnightSight names the packages for Fedora and Arch too.
+- **AppImage:** `chmod +x knightsight-linux-amd64.AppImage` (or the ARM file), then start it from wherever you keep it. It brings Python, GTK 4 and GStreamer along, so nothing needs installing, and starts on Ubuntu 22.04 and anything newer.
 - **Flatpak:** `flatpak install --user knightsight-linux-amd64.flatpak` (or the ARM file), then `flatpak run io.github.junkerderprovinz.knightsight`. The runtime comes from Flathub.
 
 ### From another machine
@@ -201,7 +202,7 @@ On a Mac with the Xcode command line tools, this builds `KnightSight.app` for Ap
 sh linux/package.sh knightsight-linux.zip
 ```
 
-This packs the Linux program into a zip. The Flatpak manifest is `linux/flatpak/io.github.junkerderprovinz.knightsight.yml`, and `python3 -m unittest discover -s linux/tests` runs the tests.
+This packs the Linux program into a zip. `sh linux/appimage.sh knightsight-linux-amd64.AppImage` builds the AppImage from the Python and GTK of the machine it runs on, so build it on Ubuntu 22.04, the oldest system it is meant to start on. The Flatpak manifest is `linux/flatpak/io.github.junkerderprovinz.knightsight.yml`, and `python3 -m unittest discover -s linux/tests` runs the tests.
 
 <br>
 
