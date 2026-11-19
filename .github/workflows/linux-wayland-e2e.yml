@@ -2,7 +2,8 @@ name: Linux Wayland end to end
 
 # Starts a headless GNOME Shell on Wayland, shares a text editor through the desktop's own
 # portal dialog and works in it through the MCP server. The pictures it took and the logs
-# of the shell, the panel and the editor stay as an artifact.
+# of the shell, the panel and the editor stay as an artifact. The panel runs from this
+# checkout and once more from the AppImage.
 on:
   push:
     branches: ["**"]
@@ -48,5 +49,66 @@ jobs:
         if: always()
         with:
           name: knightsight-${{ matrix.os }}-wayland-e2e
+          path: e2e
+          if-no-files-found: error
+
+  # The AppImage brings an older GTK and GStreamer to the desktop's newer PipeWire, so it gets
+  # the same run, built where the release builds it.
+  appimage:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install GTK, GStreamer and AT-SPI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire \
+            gstreamer1.0-plugins-base gir1.2-atspi-2.0 gir1.2-girepository-2.0 dconf-gsettings-backend libglib2.0-bin
+
+      - name: Build
+        run: PATH=/usr/bin:$PATH sh linux/appimage.sh knightsight.AppImage
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: knightsight-e2e-appimage
+          path: knightsight.AppImage
+          if-no-files-found: error
+
+  e2e-appimage:
+    needs: appimage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: knightsight-e2e-appimage
+
+      # The test itself still runs on the system's Python and GTK.
+      - name: Install GNOME Shell, its portal, PipeWire and the test's libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            gnome-shell xwayland xdg-desktop-portal xdg-desktop-portal-gnome pipewire wireplumber \
+            gnome-text-editor at-spi2-core gir1.2-atspi-2.0 \
+            python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+            gstreamer1.0-pipewire fonts-noto-core
+          fc-cache
+
+      - name: Share a window and work in it
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          chmod +x knightsight.AppImage
+          ./knightsight.AppImage --appimage-extract > /dev/null
+          SMOKE_PANEL=$PWD/squashfs-root/AppRun PATH=/usr/bin:$PATH sh linux/tests/smoke-wayland.sh e2e
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: knightsight-appimage-wayland-e2e
           path: e2e
           if-no-files-found: error

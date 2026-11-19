@@ -12,6 +12,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LINUX = os.path.dirname(HERE)
 REPO = os.path.dirname(LINUX)
 sys.path.insert(0, LINUX)
+# The panel under test: this checkout, or the program SMOKE_PANEL names, such as the AppRun
+# of an unpacked AppImage.
+PANEL = [os.environ["SMOKE_PANEL"]] if os.environ.get("SMOKE_PANEL") else [sys.executable, "-m", "knightsight"]
 
 import gi  # noqa: E402
 

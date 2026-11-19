@@ -9,11 +9,10 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 import unittest
 
-from harness import LINUX, Mcp, ask, image_of, listening, pixbuf, pixel_of, spawn, stop_all, text_of, wait_for
+from harness import LINUX, PANEL, Mcp, ask, image_of, listening, pixbuf, pixel_of, spawn, stop_all, text_of, wait_for
 
 import gi
 
@@ -173,7 +172,7 @@ class SmokeWayland(unittest.TestCase):
         place(EDITOR, 10, 60, 520, 480)
 
         env = dict(os.environ, PYTHONPATH=LINUX, PYTHONFAULTHANDLER="1")
-        cls.panel = start("panel", sys.executable, "-m", "knightsight", env=env)
+        cls.panel = start("panel", *PANEL, env=env)
         wait_for(lambda: listening() or cls.panel.poll() is not None, "the port", 60)
         if cls.panel.poll() is not None:
             raise AssertionError(f"the panel exited with {cls.panel.returncode}")

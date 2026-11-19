@@ -1,8 +1,9 @@
 name: Linux
 
 # Builds and tests the Linux app on x64 and ARM: the plain zip after the unit tests and an
-# X11 smoke test, and the Flatpak bundle. Like the Flatpak workflows of the other apps it
-# attaches nothing; release.yml calls it on a tag and puts the four files on the release.
+# X11 smoke test, the AppImage with the same smoke test and a start on a bare system, and the
+# Flatpak bundle. Like the Flatpak workflows of the other apps it attaches nothing;
+# release.yml calls it on a tag and puts the six files on the release.
 on:
   push:
     branches: ["**"]
@@ -69,6 +70,140 @@ jobs:
           name: knightsight-${{ matrix.slug }}.zip
           path: knightsight-${{ matrix.slug }}.zip
           if-no-files-found: error
+
+  appimage:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The AppImage carries Python, GTK and GStreamer but takes glibc from the system,
+          # and a program linked against a newer glibc does not start on an older one. So it
+          # is built on the oldest Ubuntu it is meant to start on.
+          - os: ubuntu-22.04
+            slug: linux-amd64
+          - os: ubuntu-22.04-arm
+            slug: linux-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install GTK, GStreamer and AT-SPI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pipewire \
+            gstreamer1.0-plugins-base gir1.2-atspi-2.0 gir1.2-girepository-2.0 dconf-gsettings-backend libglib2.0-bin
+
+      - name: Build
+        run: PATH=/usr/bin:$PATH sh linux/appimage.sh knightsight-${{ matrix.slug }}.AppImage
+
+      # Not zipped, though the artifact loses the execute bit: a downloaded AppImage
+      # needs chmod +x anyway.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: knightsight-${{ matrix.slug }}.AppImage
+          path: knightsight-${{ matrix.slug }}.AppImage
+          if-no-files-found: error
+
+  # On the runners of the plain smoke test: the window it shares has to come from a GTK that
+  # tells AT-SPI which controls are showing, which 22.04's 4.6 does not.
+  appimage-x11:
+    needs: appimage
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            slug: linux-amd64
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: knightsight-${{ matrix.slug }}.AppImage
+
+      - name: Install the X11 test tools and the test's libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            python3-gi python3-gi-cairo gir1.2-gtk-4.0 at-spi2-core gir1.2-atspi-2.0 \
+            xvfb xauth openbox xdotool python3-tk fonts-noto-core
+          fc-cache
+
+      - name: Smoke test on X11
+        run: |
+          chmod +x knightsight-${{ matrix.slug }}.AppImage
+          ./knightsight-${{ matrix.slug }}.AppImage --appimage-extract > /dev/null
+          mkdir -p x11
+          SMOKE_PANEL=$PWD/squashfs-root/AppRun SMOKE_OUT=$PWD/x11 PATH=/usr/bin:$PATH sh linux/tests/smoke-x11.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: failure()
+        with:
+          name: knightsight-${{ matrix.slug }}-appimage-x11-smoke
+          path: x11
+          if-no-files-found: ignore
+
+  # The build machine has GTK and the rest installed, which could stand in for a library the
+  # AppImage lacks. A bare Ubuntu 22.04 has only what the AppImage leaves to every desktop.
+  appimage-start:
+    needs: appimage
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            slug: linux-amd64
+          - os: ubuntu-22.04-arm
+            slug: linux-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    container:
+      image: ubuntu:22.04
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: knightsight-${{ matrix.slug }}.AppImage
+
+      - name: Install an X server and the libraries every desktop has
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            xvfb xauth dbus libfontconfig1 libfreetype6 libharfbuzz0b libfribidi0 libthai0 \
+            libgl1 libegl1 libgbm1 libwayland-client0 libwayland-cursor0 libwayland-egl1 libx11-6 libx11-xcb1 libpipewire-0.3-0
+
+      - name: Find every library
+        run: |
+          chmod +x knightsight-${{ matrix.slug }}.AppImage
+          ./knightsight-${{ matrix.slug }}.AppImage --appimage-extract > /dev/null
+          cd squashfs-root
+          find . -type f \( -name '*.so*' -o -perm -u+x \) | while read -r f; do
+            LD_LIBRARY_PATH=$PWD/usr/lib ldd "$f" 2> /dev/null | sed -n "s|^\s*\(.*\) => not found|$f: \1|p"
+          done > ../missing
+          if [ -s ../missing ]; then
+            cat ../missing
+            exit 1
+          fi
+
+      - name: Start it
+        shell: bash
+        run: |
+          dbus-run-session -- xvfb-run -a ./knightsight-${{ matrix.slug }}.AppImage --appimage-extract-and-run > panel.log 2>&1 &
+          for _ in $(seq 60); do
+            if (exec 3<> /dev/tcp/127.0.0.1/47613) 2> /dev/null; then
+              echo "KnightSight is up and listening"
+              cat panel.log
+              exit 0
+            fi
+            sleep 1
+          done
+          cat panel.log
+          exit 1
 
   flatpak:
     strategy:

@@ -13,7 +13,7 @@ import tempfile
 import time
 import unittest
 
-from harness import HERE, LINUX, Mcp, image_of, listening, pixbuf, pixel, run, spawn, stop_all, text_of, wait_for
+from harness import HERE, LINUX, PANEL, Mcp, image_of, listening, pixbuf, pixel, run, spawn, stop_all, text_of, wait_for
 
 import gi  # noqa: E402
 
@@ -140,7 +140,7 @@ class SmokeX11(unittest.TestCase):
         window("Target")
         env = dict(os.environ, LANGUAGE="en", GDK_BACKEND="x11", GSK_RENDERER="cairo", NO_AT_BRIDGE="1",
                    GTK_A11Y="none", PYTHONPATH=LINUX, PYTHONFAULTHANDLER="1")
-        cls.panel = spawn(sys.executable, "-m", "knightsight", env=env)
+        cls.panel = spawn(*PANEL, env=env)
         try:
             wait_for(lambda: listening() or cls.panel.poll() is not None, "the port", 60)
         except AssertionError:

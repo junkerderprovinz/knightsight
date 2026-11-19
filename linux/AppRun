@@ -1,0 +1,19 @@
+#!/bin/sh
+# Starts KnightSight on the Python, GTK and GStreamer the AppImage carries. The system's own
+# modules for them are built against newer versions, so every search path points into the
+# image. libpipewire and its modules come from the system, to match the running PipeWire.
+here=$(dirname "$(readlink -f "$0")")
+lib=$here/usr/lib
+
+export LD_LIBRARY_PATH="$lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export GI_TYPELIB_PATH="$lib/girepository-1.0"
+export GIO_MODULE_DIR="$lib/gio/modules"
+export GSETTINGS_SCHEMA_DIR="$here/usr/share/glib-2.0/schemas"
+export GTK_EXE_PREFIX="$here/usr"
+export XDG_DATA_DIRS="$here/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GST_PLUGIN_SYSTEM_PATH_1_0="$lib/gstreamer-1.0"
+export GST_PLUGIN_SCANNER_1_0="$here/usr/libexec/gst-plugin-scanner"
+export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-$HOME/.cache}/knightsight/gstreamer-registry.bin"
+unset PYTHONHOME
+export PYTHONPATH="$lib" PYTHONNOUSERSITE=1
+exec "$here/usr/bin/python3" -m knightsight "$@"
