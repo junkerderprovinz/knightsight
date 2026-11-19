@@ -229,7 +229,9 @@ class Column(Gtk.Box):
         self.show_notes()
 
     def show_notes(self):
-        self.list.remove_all()
+        # ListBox.remove_all needs GTK 4.12.
+        while self.list.get_first_child() is not None:
+            self.list.remove(self.list.get_first_child())
         for note in self.board.notes:
             self.list.append(self.note_row(note))
         have = bool(self.board.notes)
@@ -309,8 +311,15 @@ class Column(Gtk.Box):
 
     def save_round(self, shot):
         page = notes.page(self.round(shot), self.panel.rounds.count + 1)
+
+        def write(file):
+            file.replace_contents(page.encode("utf-8"), None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None)
+
         kind = Gtk.FileFilter(name=say.FILE_KIND)
         kind.add_suffix("html")
+        if not hasattr(Gtk, "FileDialog"):
+            self.save_with_chooser(kind, write)
+            return
         filters = Gio.ListStore.new(Gtk.FileFilter)
         filters.append(kind)
         dialog = Gtk.FileDialog(title=say.SAVE_FILE, initial_name=say.FILE_NAME, modal=True, filters=filters,
@@ -321,9 +330,26 @@ class Column(Gtk.Box):
                 file = dialog.save_finish(result)
             except GLib.Error:
                 return
-            file.replace_contents(page.encode("utf-8"), None, False, Gio.FileCreateFlags.REPLACE_DESTINATION, None)
+            write(file)
 
         dialog.save(self.view, None, chosen)
+
+    def save_with_chooser(self, kind, write):
+        """Gtk.FileDialog came with GTK 4.10. Ubuntu 22.04, whose GTK the AppImage carries, has 4.6."""
+        chooser = Gtk.FileChooserNative(title=say.SAVE_FILE, transient_for=self.view, modal=True,
+                                        action=Gtk.FileChooserAction.SAVE)
+        chooser.set_current_name(say.FILE_NAME)
+        chooser.add_filter(kind)
+
+        def answered(_chooser, response):
+            if response == Gtk.ResponseType.ACCEPT:
+                write(chooser.get_file())
+            self.chooser = None
+
+        chooser.connect("response", answered)
+        # Nothing else holds the chooser while it is open.
+        self.chooser = chooser
+        chooser.show()
 
 
 class Window(Gtk.Window):

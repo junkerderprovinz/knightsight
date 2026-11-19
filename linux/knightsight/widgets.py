@@ -21,7 +21,8 @@ class Glyph(Gtk.DrawingArea):
         self.set_draw_func(self._draw)
 
     def _draw(self, _area, ctx, width, _height):
-        c = self.get_color()
+        # Before GTK 4.10 the colour is only on the style context.
+        c = self.get_color() if hasattr(self, "get_color") else self.get_style_context().get_color()
         ctx.set_source_rgba(c.red, c.green, c.blue, c.alpha)
         glyphs.draw(ctx, self.name, width)
 

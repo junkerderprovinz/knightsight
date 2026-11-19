@@ -49,7 +49,8 @@ def window_share(frame, size=(1568, 882)):
 
 def desk():
     d = portal.Desk.__new__(portal.Desk)
-    d.panel = types.SimpleNamespace(busy=lambda: None, clicked=lambda *_: None, focused=False, under_pointer=set())
+    d.panel = types.SimpleNamespace(busy=lambda: None, clicked=lambda *_: None, focused=False,
+                                    pointer_on_us=lambda: False)
     d.sent = []
     d._notify = lambda _share, method, _signature, *args: d.sent.append((method, args))
     return d
@@ -101,7 +102,7 @@ class PaddedWindow(unittest.TestCase):
         self.assertEqual(self.desk.sent, [])
 
     def test_a_click_where_the_pointer_comes_to_rest_on_knightsight_is_refused(self):
-        self.desk.panel.under_pointer.add("panel")
+        self.desk.panel.pointer_on_us = lambda: True
         with self.assertRaises(Refused) as caught:
             self.desk.click(self.share, {"x": 100, "y": 200})
         self.assertEqual(str(caught.exception), "That point lies on KnightSight itself.")

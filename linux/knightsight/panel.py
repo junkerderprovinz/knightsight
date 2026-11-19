@@ -73,9 +73,6 @@ class Panel(Gtk.ApplicationWindow):
         self.awaiting_fetch = False
         # The controls of the last look in this share, where click and scroll find a ref.
         self.elements = None
-        # KnightSight's windows the pointer is over right now. Wayland tells a program where the
-        # pointer is only while it lies over one of its windows, and the assistant must not act on them.
-        self.under_pointer = set()
         self.palette = theme.Palette(False)
         self.css = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), self.css,
@@ -130,7 +127,6 @@ class Panel(Gtk.ApplicationWindow):
         self.add_controller(keys)
         self.connect("notify::is-active", lambda *_: self.focus_moved())
         self.connect("close-request", self.on_close)
-        self.watch_pointer(self)
 
         self.desk = make_desk(self)
         self.info.set_tooltip_text(self.desk.help)
@@ -139,15 +135,30 @@ class Panel(Gtk.ApplicationWindow):
         GLib.timeout_add(16, self.tick)
         self.show_state()
 
-    def watch_pointer(self, window):
-        motion = Gtk.EventControllerMotion()
-        motion.connect("enter", lambda *_: self.under_pointer.add(window))
-        motion.connect("leave", lambda *_: self.under_pointer.discard(window))
-        window.add_controller(motion)
+    def pointer_on_us(self):
+        """Whether the pointer rests on the panel or the pinboard. Asked from the server's thread
+        and answered by GDK on GTK's, since GTK 4.6 loses some of the desktop's enter and leave
+        on the way to its crossing signals."""
+        answer, done = [], threading.Event()
+
+        def ask():
+            pointer = self.get_display().get_default_seat().get_pointer()
+            windows = [self] if self.pinboard is None else [self, self.pinboard]
+            answer.append(any(w.get_surface().get_device_position(pointer)[0] for w in windows))
+            done.set()
+
+        GLib.idle_add(ask)
+        done.wait(1)
+        return bool(answer) and answer[0]
 
     def restyle(self, palette):
         self.palette = palette
-        self.css.load_from_string(theme.css(palette))
+        css = theme.css(palette)
+        # load_from_string came with GTK 4.12, and the AppImage carries 4.6.
+        if hasattr(self.css, "load_from_string"):
+            self.css.load_from_string(css)
+        else:
+            self.css.load_from_data(css.encode())
         self.canvas.queue_draw()
         if self.pinboard is not None:
             self.pinboard.restyle()
@@ -283,7 +294,6 @@ class Panel(Gtk.ApplicationWindow):
             return
         self.board_notice = None
         self.pinboard = self.desk.pinboard(shot, self.pinboard_closed)
-        self.watch_pointer(self.pinboard)
         self.pinboard.present()
         self.show_state()
 
@@ -292,7 +302,6 @@ class Panel(Gtk.ApplicationWindow):
             self.pinboard.close()
 
     def pinboard_closed(self):
-        self.under_pointer.discard(self.pinboard)
         self.pinboard = None
         self.focus_moved()
         self.show_state()

@@ -397,10 +397,8 @@ class Desk:
             raise Refused("This desktop lets KnightSight look, but not click or type.")
         with protocol.delivering():
             self._notify(share, "NotifyPointerMotionAbsolute", "(oa{sv}udd)", share.node, x, y)
-        # Wayland tells only the window under the pointer where it is, so KnightSight's own
-        # windows say whether the pointer came to rest on them.
         time.sleep(SETTLE_S)
-        if self.panel.under_pointer:
+        if self.panel.pointer_on_us():
             raise Refused(protocol.ON_US)
 
     def click(self, share, args):
