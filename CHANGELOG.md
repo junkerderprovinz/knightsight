@@ -6,7 +6,7 @@ Every release is written by hand. The full notes for each release are in
 
 ## v1.1.2 (2026-11-19)
 
-KnightSight tells you which version you are running, and its icon sits a little smaller.
+KnightSight keeps the notes you send until they are picked up, tells you which version you are running, and its icon sits a little smaller.
 
 ## 🎨 Design
 
@@ -15,6 +15,10 @@ KnightSight tells you which version you are running, and its icon sits a little 
 ## ⚡ Improved
 
 - **The version is in sight.** On Windows the panel's title bar shows it next to the name, and the properties of KnightSight.exe list it as file and product version.
+
+## 🐛 Fixed
+
+- **Sent notes survive a closed KnightSight.** A round you sent stays on disk until the assistant fetches it, so quitting KnightSight or a crash no longer loses it. It comes back with the next start.
 
 ## v1.1.1 (2026-11-18)
 
