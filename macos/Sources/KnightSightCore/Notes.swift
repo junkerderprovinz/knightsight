@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-public enum NoteKind: String, CaseIterable, Encodable {
+public enum NoteKind: String, CaseIterable, Codable {
     case bug, wish, question
 
     /// As 0xRRGGBB. A wish wears the app's accent.
@@ -16,7 +16,7 @@ public enum NoteKind: String, CaseIterable, Encodable {
 
 /// A note on the pinboard with one mark or more, in the order they were made. Marks count in
 /// points from the share's top left, and a pin is a mark of zero size.
-public struct Note: Equatable {
+public struct Note: Equatable, Codable {
     static let letters = Array("abcdefghijklmnopqrstuvwxyz")
     public static let maxMarks = letters.count
 
@@ -72,13 +72,13 @@ public struct Draft: Equatable {
 
 /// What Done sends: the share as look pictures it with every mark drawn on it, and per mark
 /// its place in that picture and a crop around it.
-public struct Round {
-    public struct Entry {
+public struct Round: Codable {
+    public struct Entry: Codable {
         public let note: Note
         public let marks: [Mark]
     }
 
-    public struct Mark {
+    public struct Mark: Codable {
         public let label: String
         /// In the round's picture.
         public let place: CGRect
@@ -145,15 +145,35 @@ extension Share {
 }
 
 /// The unsent notes and the latest round. The panel writes, the threads serving the
-/// port read.
+/// port read. A round not fetched yet also waits in the file, so KnightSight ending or
+/// crashing before the assistant asks does not lose it.
 public final class Board {
     private let lock = NSLock()
+    private let file: URL?
     private var stored: [Note] = []
     private var lastNumber = 0
     private var latest: Round?
     private var read = false
 
-    public init() {}
+    public init(file: URL? = nil) {
+        self.file = file
+        if let file, let data = try? Data(contentsOf: file) {
+            latest = try? JSONDecoder().decode(Round.self, from: data)
+        }
+    }
+
+    /// Written beside the file and then swapped in, so a crash in between leaves the old round
+    /// or the new one, never half of one. Should the disk refuse, the round still waits in memory.
+    private func keep(_ round: Round) {
+        guard let file, let data = try? JSONEncoder().encode(round) else { return }
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
+    }
+
+    private func drop() {
+        guard let file else { return }
+        try? FileManager.default.removeItem(at: file)
+    }
 
     private func locked<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -204,6 +224,7 @@ public final class Board {
             stored.removeAll { sent.contains($0.number) }
             latest = round
             read = false
+            keep(round)
         }
     }
 
@@ -217,6 +238,7 @@ public final class Board {
         locked {
             guard let latest else { return (0, nil) }
             if unread && read { return (latest.number, nil) }
+            if !read { drop() }
             read = true
             return (latest.number, latest)
         }

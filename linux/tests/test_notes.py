@@ -256,6 +256,36 @@ class Sending(unittest.TestCase):
         self.assertEqual(rounds.answer(True)["title"], "second")
 
 
+class Waiting(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.file = os.path.join(folder.name, "knightsight", "round.json")
+
+    def test_a_sent_round_waits_for_the_assistant_across_a_restart(self):
+        Rounds(self.file).send({"title": "first", "notes": [{"text": "Cut off"}]})
+        self.assertEqual(Rounds(self.file).answer(True),
+                         {"ok": True, "round": 1, "title": "first", "notes": [{"text": "Cut off"}]})
+
+    def test_a_fetched_round_is_not_kept_for_the_next_start(self):
+        rounds = Rounds(self.file)
+        rounds.send({"title": "first"})
+        rounds.answer(True)
+        self.assertEqual(Rounds(self.file).answer(False), {"ok": True, "round": 0})
+
+    def test_rounds_count_on_from_the_one_that_waited(self):
+        Rounds(self.file).send({"title": "first"})
+        rounds = Rounds(self.file)
+        self.assertEqual(rounds.send({"title": "second"}), 2)
+
+    def test_an_unreadable_file_counts_as_nothing_sent(self):
+        os.makedirs(os.path.dirname(self.file))
+        for content in ("{not json", "[1, 2]", '{"title": "no number"}'):
+            with open(self.file, "w") as f:
+                f.write(content)
+            self.assertEqual(Rounds(self.file).answer(False), {"ok": True, "round": 0})
+
+
 class Author(unittest.TestCase):
     def test_the_name_is_remembered(self):
         with tempfile.TemporaryDirectory() as folder:

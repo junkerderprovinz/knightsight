@@ -240,12 +240,14 @@ def assemble(title, width, height, notes, picture, crop, sent):
 
 class Rounds:
     """The latest round and whether the assistant has fetched it. The request thread reads it
-    while the panel's thread sends."""
+    while the panel's thread sends. A round not fetched yet also waits in the file, so
+    KnightSight ending or crashing before the assistant asks does not lose it."""
 
-    def __init__(self):
+    def __init__(self, file=None):
         self.lock = threading.Lock()
-        self.latest = None
-        self.count = 0
+        self.file = file
+        self.latest = _waiting(file)
+        self.count = self.latest["round"] if self.latest else 0
         self.read = False
 
     def send(self, fields):
@@ -253,14 +255,51 @@ class Rounds:
             self.count += 1
             self.latest = {"ok": True, "round": self.count, **fields}
             self.read = False
+            self._keep()
             return self.count
 
     def answer(self, unread):
         with self.lock:
             if self.latest is None or unread and self.read:
                 return {"ok": True, "round": self.count}
+            if not self.read:
+                self._drop()
             self.read = True
             return self.latest
+
+    def _keep(self):
+        """Written beside the file and then swapped in, so a crash in between leaves the old
+        round or the new one, never half of one. Should the disk refuse, the round still waits
+        in memory."""
+        if self.file is None:
+            return
+        part = self.file + ".part"
+        try:
+            os.makedirs(os.path.dirname(self.file), exist_ok=True)
+            with open(part, "w", encoding="utf-8") as f:
+                json.dump(self.latest, f)
+            os.replace(part, self.file)
+        except OSError:
+            pass
+
+    def _drop(self):
+        if self.file is None:
+            return
+        try:
+            os.remove(self.file)
+        except OSError:
+            pass
+
+
+def _waiting(file):
+    if file is None:
+        return None
+    try:
+        with open(file, encoding="utf-8") as f:
+            latest = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return latest if isinstance(latest, dict) and isinstance(latest.get("round"), int) else None
 
 
 def load_author(folder):

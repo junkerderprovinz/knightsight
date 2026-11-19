@@ -2295,6 +2295,8 @@ namespace KnightSight
 
     // The notes on the pinboard and the round sent last. The notes belong to the panel's
     // thread, the round is read from the request threads too, so it goes through the lock.
+    // A round not fetched yet also waits in the file, so KnightSight ending or crashing
+    // before the assistant asks does not lose it.
     class Board
     {
         public readonly List<Note> Notes = new List<Note>();
@@ -2302,6 +2304,56 @@ namespace KnightSight
         int next = 1, rounds;
         Round sent;
         bool read;
+        readonly string file;
+
+        public Board(string file = null)
+        {
+            this.file = file;
+            sent = Waiting(file);
+            if (sent != null) rounds = sent.Number;
+        }
+
+        static Round Waiting(string file)
+        {
+            if (file == null || !File.Exists(file)) return null;
+            try
+            {
+                var fields = Json().Deserialize<Dictionary<string, object>>(File.ReadAllText(file));
+                return new Round { Number = (int)fields["round"], Fields = fields };
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }; }
+
+        // Written beside the file and then swapped in, so a crash in between leaves the old
+        // round or the new one, never half of one. Should the disk refuse, the round still
+        // waits in memory.
+        void Keep(Round round)
+        {
+            if (file == null) return;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                var part = file + ".part";
+                File.WriteAllText(part, Json().Serialize(round.Fields), new UTF8Encoding(false));
+                if (File.Exists(file)) File.Replace(part, file, null);
+                else File.Move(part, file);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        void Drop()
+        {
+            if (file == null) return;
+            try { File.Delete(file); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
 
         public bool Fetched { get { lock (this) return sent != null && read; } }
 
@@ -2425,6 +2477,7 @@ namespace KnightSight
         {
             lock (this)
             {
+                Keep(round);
                 sent = round;
                 read = false;
                 rounds = round.Number;
@@ -2441,6 +2494,7 @@ namespace KnightSight
             {
                 if (sent == null) return new Dictionary<string, object> { { "round", 0 } };
                 if (unread && read) return new Dictionary<string, object> { { "round", sent.Number } };
+                if (!read) Drop();
                 read = true;
                 return sent.Fields;
             }
@@ -3814,7 +3868,7 @@ namespace KnightSight
             toggle = new SoftButton { Primary = true, Icon = Glyph.Start }, info = new SoftButton { Blank = true, Icon = Glyph.Info },
             minimise = new SoftButton { Blank = true, Icon = Glyph.Minimise }, close = new SoftButton { Blank = true, Icon = Glyph.Close },
             pin = new SoftButton { Icon = Glyph.Pin };
-        readonly Board board = new Board();
+        readonly Board board = new Board(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KnightSight", "round.json"));
         readonly Pinboard pinboard;
         readonly ToolTip tip = new ToolTip { OwnerDraw = true, AutoPopDelay = 20000, InitialDelay = 200 };
         readonly Font titleFont, bodyFont, tipFont;

@@ -184,6 +184,66 @@ namespace KnightSight
             True(board.Answer(false).ContainsKey("notes"), "asking without unread brings the round again");
         }
 
+        static void InFolder(Action<string> test)
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "knightsight-" + Guid.NewGuid().ToString("N"));
+            try { test(Path.Combine(folder, "round.json")); }
+            finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+        }
+
+        static Dictionary<string, object> SendTo(Board board, bool approved = false)
+        {
+            board.Add(Marks(new RectangleF(10, 10, 20, 20)), NoteKind.Bug, "Cut off", "Junker");
+            Round round;
+            using (var bmp = new Bitmap(100, 100)) round = board.Seal(bmp, 1, "t", DateTime.UtcNow, approved);
+            board.Send(round);
+            return round.Fields;
+        }
+
+        static void SentRoundWaitsForTheAssistantAcrossARestart()
+        {
+            InFolder(file =>
+            {
+                var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                var sent = json.Serialize(SendTo(new Board(file), true));
+                var waiting = new Board(file).Answer(true);
+                Same("Cut off", Field(waiting, 0)["text"]);
+                Same(sent, json.Serialize(waiting));
+            });
+        }
+
+        static void FetchedRoundIsNotKeptForTheNextStart()
+        {
+            InFolder(file =>
+            {
+                var board = new Board(file);
+                SendTo(board);
+                board.Answer(true);
+                Same(0, new Board(file).Answer(false)["round"]);
+            });
+        }
+
+        static void RoundsCountOnFromTheOneThatWaited()
+        {
+            InFolder(file =>
+            {
+                SendTo(new Board(file));
+                var board = new Board(file);
+                SendTo(board);
+                Same(2, board.Answer(true)["round"]);
+            });
+        }
+
+        static void UnreadableRoundFileCountsAsNothingSent()
+        {
+            InFolder(file =>
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                File.WriteAllText(file, "{not json");
+                Same(0, new Board(file).Answer(false)["round"]);
+            });
+        }
+
         static void RoundCountsAsFetchedOnceHandedOut()
         {
             var board = BoardWith(new RectangleF(10, 10, 20, 20));

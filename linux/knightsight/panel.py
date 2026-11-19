@@ -1,6 +1,7 @@
 """The KnightSight window: choose a window or a region, start and stop sharing, see what goes on."""
 
 import math
+import os
 import threading
 import time
 import traceback
@@ -65,7 +66,7 @@ class Panel(Gtk.ApplicationWindow):
         self.last_tick = time.monotonic()
         self.last_error = None
         self.board = notes.Board()
-        self.rounds = notes.Rounds()
+        self.rounds = notes.Rounds(os.path.join(GLib.get_user_state_dir(), "knightsight", "round.json"))
         self.pinboard = None
         self.toggle_gate = notes.Gate(TOGGLE_SPAN)
         self.board_notice = None

@@ -12,7 +12,8 @@ final class Panel: NSObject, NSWindowDelegate {
 
     private let say = Say.current
     private let session = Session()
-    private let board = Board()
+    private let board = Board(file: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("KnightSight/round.json"))
     private let window: NSWindow
     private let view: PanelView
     private let frame = Frame()

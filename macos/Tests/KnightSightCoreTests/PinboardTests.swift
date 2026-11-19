@@ -56,6 +56,46 @@ final class PinboardTests: XCTestCase {
         XCTAssertFalse(board.fetched(2))
     }
 
+    func roundFile() -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("knightsight-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        return folder.appendingPathComponent("round.json")
+    }
+
+    func testASentRoundWaitsForTheAssistantAcrossARestart() {
+        let file = roundFile()
+        let sent = note(box, pin, number: 3, kind: .bug, text: "Cut off", author: "Junker")
+        Board(file: file).send(round([sent], number: 2))
+        let (number, latest) = Board(file: file).fetch(unread: true)
+        XCTAssertEqual(number, 2)
+        XCTAssertEqual(latest?.title, "notes.txt")
+        XCTAssertEqual(latest?.image, Data([7]))
+        XCTAssertEqual(latest?.entries.map(\.note), [sent])
+        XCTAssertEqual(latest?.entries.first?.marks.map(\.place), [share.picture(box), share.picture(pin)])
+        XCTAssertEqual(latest?.entries.first?.marks.map(\.image), [Data([9]), Data([9])])
+    }
+
+    func testAFetchedRoundIsNotKeptForTheNextStart() {
+        let file = roundFile()
+        let board = Board(file: file)
+        board.send(round([note(.zero)]))
+        _ = board.fetch(unread: true)
+        XCTAssertEqual(Board(file: file).fetch(unread: false).number, 0)
+    }
+
+    func testRoundsCountOnFromTheOneThatWaited() {
+        let file = roundFile()
+        Board(file: file).send(round([note(.zero)]))
+        XCTAssertEqual(Board(file: file).nextRound, 2)
+    }
+
+    func testAnUnreadableFileCountsAsNothingSent() throws {
+        let file = roundFile()
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{not json".utf8).write(to: file)
+        XCTAssertEqual(Board(file: file).fetch(unread: false).number, 0)
+    }
+
     func testAnUpdateKeepsTheNumberAndTakesTheMarksAsEdited() {
         let board = Board()
         let mark = CGRect(x: 5, y: 6, width: 7, height: 8)
