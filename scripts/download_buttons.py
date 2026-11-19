@@ -16,6 +16,8 @@ BUTTONS = {
     "macos": RELEASE + "knightsight-macos-universal.zip",
     "linux": RELEASE + "knightsight-linux-amd64.zip",
     "linux-arm": RELEASE + "knightsight-linux-arm64.zip",
+    "appimage": RELEASE + "knightsight-linux-amd64.AppImage",
+    "appimage-arm": RELEASE + "knightsight-linux-arm64.AppImage",
     "flatpak": RELEASE + "knightsight-linux-amd64.flatpak",
     "flatpak-arm": RELEASE + "knightsight-linux-arm64.flatpak",
 }
