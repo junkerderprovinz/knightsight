@@ -86,7 +86,7 @@ test('says how notes get sent while none have been', async () => {
     assert.equal(result.isError, undefined);
     assert.match(result.content[0].text, /No notes have been sent yet/);
     assert.match(result.content[0].text, /Ctrl\+Shift\+A/);
-    assert.deepEqual(seen, [{ cmd: 'notes' }]);
+    assert.deepEqual(seen, [{ cmd: 'notes', confirm: true }]);
   });
 });
 
@@ -127,13 +127,44 @@ test('puts an approval at the top, also without notes', async () => {
 });
 
 test('waits for a round not read yet', async () => {
-  const answer = (request, n) => (n < 3 ? { ok: true, round: 1 } : ROUND);
+  const answer = (request, n) => (n < 3 || request.read ? { ok: true, round: 1 } : ROUND);
   await session(answer, async (c, seen) => {
     const { result } = await c.call('tools/call', { name: 'pinboard', arguments: { wait: 30 }, _meta: { progressToken: 'p' } });
     assert.match(result.content[0].text, /^Round 2/);
-    assert.equal(seen.length, 3);
-    assert.ok(seen.every((r) => r.cmd === 'notes' && r.unread === true));
+    assert.deepEqual(seen.slice(0, 3), Array(3).fill({ cmd: 'notes', unread: true, confirm: true }));
     assert.ok(c.notices.some((n) => n.method === 'notifications/progress' && n.params.progressToken === 'p'));
+  });
+});
+
+// Stands in for a panel that keeps rounds until they are confirmed, oldest first.
+function keeper(rounds) {
+  const waiting = [...rounds];
+  return (request) => {
+    if (request.read !== undefined) {
+      while (waiting.length && waiting[0].round <= request.read) waiting.shift();
+      return { ok: true };
+    }
+    return waiting[0] ?? { ok: true, round: rounds.at(-1).round };
+  };
+}
+
+test('confirms a round once it has it, so the panel lets it go', async () => {
+  await session(keeper([ROUND]), async (c, seen) => {
+    await c.call('tools/call', { name: 'pinboard', arguments: { wait: 30 } });
+    assert.deepEqual(seen, [
+      { cmd: 'notes', unread: true, confirm: true },
+      { cmd: 'notes', read: 2 },
+      { cmd: 'notes', unread: true, confirm: true },
+    ]);
+  });
+});
+
+test('brings every round that waited, the oldest first', async () => {
+  const later = { ...ROUND, round: 3, sent: '2026-11-15T13:09:40Z', notes: [ROUND.notes[0]] };
+  await session(keeper([ROUND, later]), async (c) => {
+    const { result } = await c.call('tools/call', { name: 'pinboard', arguments: {} });
+    const heads = result.content.filter((part) => part.type === 'text' && part.text.startsWith('Round'));
+    assert.deepEqual(heads.map((part) => part.text.match(/^Round \d+/)[0]), ['Round 2', 'Round 3']);
   });
 });
 
@@ -155,7 +186,7 @@ test('passes a refusal from the panel on as an error', async () => {
   });
 });
 
-test('tells that sent notes wait for KnightSight to run again', async () => {
+test('tells that notes wait for KnightSight to run again', async () => {
   const c = client();
   try {
     const { result } = await c.call('tools/call', { name: 'pinboard', arguments: { wait: 30 } });
@@ -222,4 +253,59 @@ test('gives up waiting for a control after the seconds it was given', async () =
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /within 1 second\./);
   });
+});
+
+// A stand-in for ssh on the PATH. As a tunnel it takes connections and closes them unanswered,
+// the way nothing listening on the desk shows up. Asked a command, it answers like a desk
+// where desk says whether it is Windows or not and whether KnightSight runs.
+const FAKE_SSH = `#!/usr/bin/env node
+const net = require('node:net');
+const args = process.argv.slice(2);
+if (args.includes('-N')) {
+  const local = Number(args[args.indexOf('-L') + 1].split(':')[1]);
+  net.createServer((socket) => socket.destroy()).listen(local, '127.0.0.1');
+} else {
+  const [system, runs] = process.env.FAKE_DESK.split(' ');
+  const command = args.at(-1);
+  if (command.startsWith('tasklist')) {
+    if (system !== 'windows') process.exit(127);
+    console.log(runs === 'runs' ? 'KnightSight.exe  4242 Console  1  55.240 K' : 'INFO: No tasks are running which match the specified criteria.');
+  } else process.exit(runs === 'runs' ? 0 : 1);
+}
+`;
+
+async function deskCall(desk) {
+  const { mkdtemp, writeFile, chmod, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join, delimiter } = await import('node:path');
+  const bin = await mkdtemp(join(tmpdir(), 'knightsight-ssh-'));
+  await writeFile(join(bin, 'ssh'), FAKE_SSH);
+  await chmod(join(bin, 'ssh'), 0o755);
+  const child = spawn(process.execPath, [SERVER], {
+    stdio: ['pipe', 'pipe', 'inherit'],
+    env: { ...process.env, KNIGHTSIGHT_SSH: 'desk', FAKE_DESK: desk, PATH: bin + delimiter + process.env.PATH },
+  });
+  try {
+    const line = await new Promise((resolve) => {
+      readline.createInterface({ input: child.stdout }).once('line', resolve);
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'pinboard', arguments: {} } }) + '\n');
+    });
+    return JSON.parse(line).result;
+  } finally {
+    child.kill();
+    await rm(bin, { recursive: true, force: true });
+  }
+}
+
+const onUnix = { skip: process.platform === 'win32' && 'the stand-in for ssh is a script' };
+
+test('tells a KnightSight that runs but does not answer from one that is not running', onUnix, async () => {
+  for (const system of ['windows', 'unix']) {
+    const silent = await deskCall(`${system} runs`);
+    assert.equal(silent.isError, true);
+    assert.match(silent.content[0].text, /^KnightSight runs on desk, but nothing answers on its port 47613\./);
+    const gone = await deskCall(`${system} stopped`);
+    assert.match(gone.content[0].text, /^KnightSight is not running\. .* It was looked for on desk\./);
+    assert.match(gone.content[0].text, /kept/);
+  }
 });

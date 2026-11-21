@@ -5,7 +5,7 @@
 // SSH tunnel that stays open, so a click costs a round trip and not a new SSH login.
 import net from 'node:net';
 import readline from 'node:readline';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const PIPE = '\\\\.\\pipe\\knightsight';
@@ -206,6 +206,36 @@ function openTunnel(d) {
 
 process.on('exit', () => tunnel?.child?.kill());
 
+function ask(d, command) {
+  const login = d.user ? ['-l', d.user, d.host] : [d.host];
+  return new Promise((resolve) => {
+    execFile('ssh', ['-n', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...login, command], { timeout: 20000, windowsHide: true },
+      (err, stdout) => resolve({ code: err ? err.code ?? -1 : 0, stdout }));
+  });
+}
+
+// Whether KnightSight runs on the desk, once its port gave no answer: true, false, or null
+// when the desk does not say. tasklist answers on Windows, pgrep everywhere else, where it
+// exits with 1 for no match.
+async function runsOn(d) {
+  const windows = await ask(d, 'tasklist /NH /FI "IMAGENAME eq KnightSight.exe"');
+  if (windows.code === 0) return /KnightSight\.exe/i.test(windows.stdout);
+  const unix = await ask(d, 'pgrep -if knightsight');
+  return unix.code === 0 ? true : unix.code === 1 ? false : null;
+}
+
+async function silence(d) {
+  const runs = await runsOn(d);
+  if (runs) {
+    return {
+      ok: false, kept: true,
+      error: `KnightSight runs on ${d.host}, but nothing answers on its port ${PORT}. Another program may be holding it. ` +
+        'KnightSight takes the port once it is free, and restarting KnightSight helps too.',
+    };
+  }
+  return { ok: false, kept: true, error: `${NOT_RUNNING} It was looked for on ${d.host}.` };
+}
+
 async function viaDesk(msg, d) {
   let port;
   try {
@@ -213,12 +243,13 @@ async function viaDesk(msg, d) {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+  let reply;
   try {
-    const reply = await exchange(net.connect(port, '127.0.0.1'), msg);
-    return reply ?? { ok: false, absent: true, error: `${NOT_RUNNING} It was looked for on ${d.host}.` };
+    reply = await exchange(net.connect(port, '127.0.0.1'), msg);
   } catch (err) {
     return { ok: false, error: `The tunnel to ${d.host} broke off: ${err.message}` };
   }
+  return reply ?? silence(d);
 }
 
 // The pipe exists only on Windows. On macOS and Linux the panel listens on the loopback port.
@@ -229,7 +260,7 @@ const absent = (err) => err.code === 'ENOENT' || err.code === 'ECONNREFUSED';
 async function relay(msg) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return (await exchange(local(), msg)) ?? { ok: false, absent: true, error: NOT_RUNNING };
+      return (await exchange(local(), msg)) ?? { ok: false, kept: true, error: NOT_RUNNING };
     } catch (err) {
       if (attempt < 20 && (absent(err) || err.code === 'EBUSY')) {
         if (absent(err) && desk()) break;
@@ -241,7 +272,7 @@ async function relay(msg) {
     }
   }
   const d = desk();
-  return d ? viaDesk(msg, d) : { ok: false, absent: true, error: NOT_RUNNING };
+  return d ? viaDesk(msg, d) : { ok: false, kept: true, error: NOT_RUNNING };
 }
 
 const text = (lines, isError = false) => ({ content: [{ type: 'text', text: lines.join('\n') }], ...(isError ? { isError } : {}) });
@@ -291,10 +322,12 @@ const HOW_TO_PIN =
   'in the KnightSight window, pins notes onto the share and sends them.';
 const KINDS = { bug: 'Bug', wish: 'Wish', question: 'Question' };
 
-// KnightSight keeps a round on disk until it is fetched, so notes sent before it ended are
-// not lost and come with the first call after it runs again.
+// KnightSight keeps the notes on its pinboard and every round sent on disk until this server
+// confirms it has read the round, so nothing is lost while it cannot be reached.
 function unreachable(reply) {
-  const kept = reply.absent ? ['Notes the person sent before it stopped are kept and come along once KnightSight runs again.'] : [];
+  const kept = reply.kept
+    ? ['The notes the person sent and those still on the pinboard are kept. Sent notes come along once KnightSight answers again.']
+    : [];
   return text([reply.error, ...kept], true);
 }
 
@@ -326,21 +359,35 @@ function round(reply) {
   };
 }
 
-// The panel answers a round it already handed out with its number alone, so waiting is
+// A round is confirmed once it is here, so the panel lets it go, and the rounds that waited
+// behind it come along in the same answer. The panel answers a plain ask with no round
+// waiting with the last one again, and an unread one with its number alone, so waiting is
 // asking again until one comes with notes.
+async function collect(first) {
+  const rounds = [first];
+  for (let reply = first; ;) {
+    await relay({ cmd: 'notes', read: reply.round });
+    reply = await relay({ cmd: 'notes', unread: true, confirm: true });
+    if (!reply.ok || !reply.notes || rounds.some((r) => r.round === reply.round)) break;
+    rounds.push(reply);
+  }
+  const parts = rounds.map(round);
+  return { content: parts.flatMap((p) => p.content) };
+}
+
 async function notes(args, progress) {
   const wait = Math.min(Math.max(Number(args.wait) || 0, 0), 3600);
   if (!wait) {
-    const reply = await relay({ cmd: 'notes' });
+    const reply = await relay({ cmd: 'notes', confirm: true });
     if (!reply.ok) return unreachable(reply);
-    return reply.notes ? round(reply) : text([`No notes have been sent yet. ${HOW_TO_PIN}`]);
+    return reply.notes ? collect(reply) : text([`No notes have been sent yet. ${HOW_TO_PIN}`]);
   }
   const started = Date.now();
   const until = started + wait * 1000;
   for (;;) {
-    const reply = await relay({ cmd: 'notes', unread: true });
+    const reply = await relay({ cmd: 'notes', unread: true, confirm: true });
     if (!reply.ok) return unreachable(reply);
-    if (reply.notes) return round(reply);
+    if (reply.notes) return collect(reply);
     if (Date.now() >= until) return text([`No new notes within ${wait} ${wait === 1 ? 'second' : 'seconds'}. ${HOW_TO_PIN}`]);
     progress?.(Math.round((Date.now() - started) / 100) / 10, wait);
     await sleep(Math.min(500, until - Date.now()));
