@@ -12,8 +12,8 @@ final class Panel: NSObject, NSWindowDelegate {
 
     private let say = Say.current
     private let session = Session()
-    private let board = Board(file: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("KnightSight/round.json"))
+    private let board = Board(folder: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("KnightSight"))
     private let window: NSWindow
     private let view: PanelView
     private let frame = Frame()
@@ -72,15 +72,24 @@ final class Panel: NSObject, NSWindowDelegate {
         session.marks = Set((frame.edges + [badge.window, cursor.window] + pinboard.windows).map { CGWindowID($0.windowNumber) })
 
         hotkey = Hotkey(stop: { [weak self] in self?.stop() }, pinboard: { [weak self] in self?.togglePinboard() })
-        let responder = Responder(desk: desk, say: say)
-        server = try? LineServer(port: Responder.port, answer: responder.answer)
-        server?.start()
+        listen(Responder(desk: desk, say: say))
         let timer = Timer(timeInterval: 1.0 / 60, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)
 
         checkPermissions()
         showState()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Another program may hold the port, such as a KnightSight that is still closing, and the
+    /// assistant would find nobody behind it. So the port is tried again until it is free.
+    private func listen(_ responder: Responder) {
+        guard let server = try? LineServer(port: Responder.port, answer: responder.answer) else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.listen(responder) }
+            return
+        }
+        self.server = server
+        server.start()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -103,7 +112,7 @@ final class Panel: NSObject, NSWindowDelegate {
     private func subline() -> String {
         if picking { return say.clickTarget }
         if missing.screen || missing.input { return say.allow(screen: missing.screen, input: missing.input) }
-        guard let chosen = session.chosen else { return say.chooseTarget }
+        guard let chosen = session.chosen else { return board.restored ? say.fromLastTime(board.notes.count) : say.chooseTarget }
         if session.active && pinboard.isOpen { return say.pinboardOn }
         if session.active && working { return say.doing + session.doing }
         if session.active, let notice { return notice }
@@ -186,7 +195,7 @@ final class Panel: NSObject, NSWindowDelegate {
 
     // Notes belong to what they were written on.
     private func choose(_ chosen: Chosen) {
-        if session.chosen.map({ $0.window != chosen.window || $0.region != chosen.region }) ?? true { board.clear() }
+        if session.chosen.map({ $0.window != chosen.window || $0.region != chosen.region }) ?? true { board.forget() }
         session.chosen = chosen
         notice = nil
         view.preview = nil

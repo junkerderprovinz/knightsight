@@ -61,6 +61,14 @@ public struct Say {
     public var fileKind: String { pick("Pinboard notes", "Pinnwand-Notizen") }
     public var fileName: String { pick("knightsight-notes.html", "knightsight-notizen.html") }
 
+    public func fromLastTime(_ count: Int) -> String {
+        count == 1
+            ? pick("1 note from last time is waiting. Share the same window or region again to see it.",
+                   "1 Notiz vom letzten Mal wartet. Gib dasselbe Fenster oder denselben Bereich wieder frei, dann siehst du sie.")
+            : pick("\(count) notes from last time are waiting. Share the same window or region again to see them.",
+                   "\(count) Notizen vom letzten Mal warten. Gib dasselbe Fenster oder denselben Bereich wieder frei, dann siehst du sie.")
+    }
+
     public func sent(_ count: Int) -> String {
         count == 1
             ? pick("Sent 1 note. Your assistant can fetch it now.", "1 Notiz gesendet. Dein Assistent kann sie abholen.")

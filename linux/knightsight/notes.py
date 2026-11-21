@@ -61,23 +61,79 @@ def kind_line(note):
 
 
 class Board:
-    """The unsent notes. Their numbers keep counting across rounds."""
+    """The unsent notes. Their numbers keep counting across rounds. Every change also goes to
+    the file, so the notes come back after KnightSight ended or crashed. restored says they
+    did and no share has taken them over yet."""
 
-    def __init__(self):
-        self.notes = []
-        self.next = 1
+    def __init__(self, file=None):
+        self.file = file
+        self.notes = _pinned(file)
+        self.next = max((n.number for n in self.notes), default=0) + 1
+        self.restored = bool(self.notes)
 
     def add(self, kind, text, author, marks):
         note = Note(self.next, kind, text, author, list(marks))
         self.next += 1
         self.notes.append(note)
+        self._keep()
         return note
+
+    def update(self, note, kind, text, author, marks):
+        note.kind, note.text, note.author, note.marks = kind, text, author, list(marks)
+        self._keep()
 
     def remove(self, note):
         self.notes.remove(note)
+        self._keep()
 
     def clear(self):
         self.notes = []
+        self._keep()
+
+    def forget(self):
+        """Drops the notes when another share is chosen. The ones from the last run go to the
+        first share chosen, most likely the one they were pinned to."""
+        if self.restored:
+            self.restored = False
+        else:
+            self.notes = []
+        self._keep()
+
+    def _keep(self):
+        if self.file is not None:
+            _write(self.file, {"notes": [{"number": n.number, "kind": n.kind, "text": n.text, "author": n.author,
+                                          "marks": [vars(m) for m in n.marks]} for n in self.notes]})
+
+
+def _pinned(file):
+    if file is None:
+        return []
+    try:
+        with open(file, encoding="utf-8") as f:
+            return [Note(int(n["number"]), _kind(n["kind"]), str(n["text"]), str(n["author"]),
+                         [Mark(int(m["x"]), int(m["y"]), int(m["width"]), int(m["height"])) for m in n["marks"]])
+                    for n in json.load(f)["notes"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def _kind(kind):
+    if kind not in KINDS:
+        raise ValueError(kind)
+    return kind
+
+
+def _write(file, content):
+    """Written beside the file and then swapped in, so a crash in between leaves the old
+    content or the new one, never half of it. Should the disk refuse, it still waits in memory."""
+    part = file + ".part"
+    try:
+        os.makedirs(os.path.dirname(file), exist_ok=True)
+        with open(part, "w", encoding="utf-8") as f:
+            json.dump(content, f)
+        os.replace(part, file)
+    except OSError:
+        pass
 
 
 class Gate:
@@ -239,67 +295,80 @@ def assemble(title, width, height, notes, picture, crop, sent):
 
 
 class Rounds:
-    """The latest round and whether the assistant has fetched it. The request thread reads it
-    while the panel's thread sends. A round not fetched yet also waits in the file, so
-    KnightSight ending or crashing before the assistant asks does not lose it."""
+    """The rounds sent and which the assistant has. The request thread reads them while the
+    panel's thread sends. Each one also waits in a file of the folder until the assistant
+    confirms it has read it, so KnightSight ending or crashing before then does not lose it.
+    An assistant that does not confirm gets a round once."""
 
-    def __init__(self, file=None):
+    def __init__(self, folder=None):
         self.lock = threading.Lock()
-        self.file = file
-        self.latest = _waiting(file)
+        self.folder = folder
+        self.waiting = _waiting(folder)
+        self.latest = self.waiting[-1][0] if self.waiting else None
         self.count = self.latest["round"] if self.latest else 0
-        self.read = False
+        self.handed = 0
+
+    @property
+    def read(self):
+        with self.lock:
+            return self.latest is not None and self.handed >= self.latest["round"]
 
     def send(self, fields):
         with self.lock:
             self.count += 1
             self.latest = {"ok": True, "round": self.count, **fields}
-            self.read = False
-            self._keep()
+            file = None
+            if self.folder is not None:
+                file = os.path.join(self.folder, "sent", f"{self.count}.json")
+                _write(file, self.latest)
+            self.waiting.append((self.latest, file))
             return self.count
 
-    def answer(self, unread):
+    def answer(self, unread, confirms=False):
+        """The oldest round not confirmed yet. Without one, unread answers with the number of
+        the last round alone, which is what the MCP server waits on, and a plain ask brings
+        the last round again."""
         with self.lock:
-            if self.latest is None or unread and self.read:
-                return {"ok": True, "round": self.count}
-            if not self.read:
-                self._drop()
-            self.read = True
-            return self.latest
+            if not self.waiting:
+                return {"ok": True, "round": self.count} if unread or self.latest is None else self.latest
+            fields = self.waiting[0][0]
+            self.handed = max(self.handed, fields["round"])
+            if not confirms:
+                self._settle(fields["round"])
+            return fields
 
-    def _keep(self):
-        """Written beside the file and then swapped in, so a crash in between leaves the old
-        round or the new one, never half of one. Should the disk refuse, the round still waits
-        in memory."""
-        if self.file is None:
-            return
-        part = self.file + ".part"
+    def confirm(self, number):
+        with self.lock:
+            self._settle(number)
+
+    def _settle(self, number):
+        for fields, file in [w for w in self.waiting if w[0]["round"] <= number]:
+            self.waiting.remove((fields, file))
+            if file is not None:
+                try:
+                    os.remove(file)
+                except OSError:
+                    pass
+
+
+def _waiting(folder):
+    """The rounds in the folder, oldest first. round.json is where 1.1.2 kept its single round."""
+    if folder is None:
+        return []
+    files = [os.path.join(folder, "round.json")]
+    sent = os.path.join(folder, "sent")
+    if os.path.isdir(sent):
+        files += [os.path.join(sent, name) for name in os.listdir(sent) if name.endswith(".json")]
+    found = []
+    for file in files:
         try:
-            os.makedirs(os.path.dirname(self.file), exist_ok=True)
-            with open(part, "w", encoding="utf-8") as f:
-                json.dump(self.latest, f)
-            os.replace(part, self.file)
-        except OSError:
-            pass
-
-    def _drop(self):
-        if self.file is None:
-            return
-        try:
-            os.remove(self.file)
-        except OSError:
-            pass
-
-
-def _waiting(file):
-    if file is None:
-        return None
-    try:
-        with open(file, encoding="utf-8") as f:
-            latest = json.load(f)
-    except (OSError, ValueError):
-        return None
-    return latest if isinstance(latest, dict) and isinstance(latest.get("round"), int) else None
+            with open(file, encoding="utf-8") as f:
+                fields = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(fields, dict) and isinstance(fields.get("round"), int):
+            found.append((fields, file))
+    return sorted(found, key=lambda w: w[0]["round"])
 
 
 def load_author(folder):

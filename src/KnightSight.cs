@@ -210,6 +210,13 @@ namespace KnightSight
                 : Pick("Approved with " + notes + " notes. Your assistant can fetch them now.", "Abgenommen mit " + notes + " Notizen. Dein Assistent kann sie abholen.");
         }
 
+        public static string FromLastTime(int count)
+        {
+            return count == 1
+                ? Pick("1 note from last time is waiting. Share the same window or region again to see it.", "1 Notiz vom letzten Mal wartet. Gib dasselbe Fenster oder denselben Bereich wieder frei, dann siehst du sie.")
+                : Pick(count + " notes from last time are waiting. Share the same window or region again to see them.", count + " Notizen vom letzten Mal warten. Gib dasselbe Fenster oder denselben Bereich wieder frei, dann siehst du sie.");
+        }
+
         public static string Sent(int count)
         {
             return count == 1
@@ -2291,55 +2298,141 @@ namespace KnightSight
         public bool KeepsNotes;
         // The elements under the marks by label, in the person's words, for the saved page.
         public Dictionary<string, string> Places = new Dictionary<string, string>();
+        // Where it waits on disk until the assistant has it.
+        public string Kept;
     }
 
-    // The notes on the pinboard and the round sent last. The notes belong to the panel's
-    // thread, the round is read from the request threads too, so it goes through the lock.
-    // A round not fetched yet also waits in the file, so KnightSight ending or crashing
-    // before the assistant asks does not lose it.
+    // The notes on the pinboard and the rounds sent. The notes belong to the panel's thread,
+    // the rounds are read from the request threads too, so they go through the lock. Both
+    // live in the folder as well, so KnightSight ending or crashing loses neither: the notes
+    // come back onto the pinboard, and a round waits there until the assistant confirms it
+    // has read it. An assistant that does not confirm gets a round once.
     class Board
     {
         public readonly List<Note> Notes = new List<Note>();
         public bool Open { get; private set; }
-        int next = 1, rounds;
-        Round sent;
-        bool read;
-        readonly string file;
+        // Notes from the last run that no share has taken over yet.
+        public bool Restored { get; private set; }
+        int next = 1, rounds, handed;
+        readonly List<Round> waiting = new List<Round>();
+        Round latest;
+        readonly string folder;
 
-        public Board(string file = null)
+        public Board(string folder = null)
         {
-            this.file = file;
-            sent = Waiting(file);
-            if (sent != null) rounds = sent.Number;
+            this.folder = folder;
+            if (folder == null) return;
+            Restore();
+            foreach (var round in Waiting(folder)) Queue(round);
+            if (waiting.Count > 0) latest = waiting[waiting.Count - 1];
         }
 
-        static Round Waiting(string file)
+        string NotesFile { get { return Path.Combine(folder, "notes.json"); } }
+
+        void Queue(Round round)
         {
-            if (file == null || !File.Exists(file)) return null;
+            waiting.Add(round);
+            rounds = Math.Max(rounds, round.Number);
+        }
+
+        // Each round waits in a file named by its number. round.json is where 1.1.2 kept its
+        // single round.
+        static IEnumerable<Round> Waiting(string folder)
+        {
+            var found = new List<Round>();
+            var files = new List<string> { Path.Combine(folder, "round.json") };
+            var sent = Path.Combine(folder, "sent");
+            if (Directory.Exists(sent)) files.AddRange(Directory.GetFiles(sent, "*.json"));
+            foreach (var file in files)
+            {
+                if (!File.Exists(file)) continue;
+                try
+                {
+                    var fields = Json().Deserialize<Dictionary<string, object>>(File.ReadAllText(file));
+                    found.Add(new Round { Number = (int)fields["round"], Fields = fields, Kept = file });
+                }
+                catch (Exception) { }
+            }
+            found.Sort((a, b) => a.Number.CompareTo(b.Number));
+            return found;
+        }
+
+        void Restore()
+        {
+            if (!File.Exists(NotesFile)) return;
             try
             {
-                var fields = Json().Deserialize<Dictionary<string, object>>(File.ReadAllText(file));
-                return new Round { Number = (int)fields["round"], Fields = fields };
+                var saved = Json().Deserialize<Dictionary<string, object>>(File.ReadAllText(NotesFile));
+                var notes = new List<Note>();
+                foreach (Dictionary<string, object> n in (System.Collections.IEnumerable)saved["notes"])
+                {
+                    var note = new Note
+                    {
+                        Number = (int)n["number"], Kind = (NoteKind)Array.IndexOf(Note.Keys, (string)n["kind"]),
+                        Text = (string)n["text"], Author = (string)n["author"],
+                    };
+                    if (note.Kind < 0) throw new FormatException();
+                    foreach (Dictionary<string, object> m in (System.Collections.IEnumerable)n["marks"]) note.Marks.Add(Unpack(m));
+                    notes.Add(note);
+                }
+                Notes.AddRange(notes);
+                foreach (var note in Notes) next = Math.Max(next, note.Number + 1);
+                Restored = Notes.Count > 0;
             }
             catch (Exception)
             {
-                return null;
+                Notes.Clear();
             }
+        }
+
+        static Mark Unpack(Dictionary<string, object> m)
+        {
+            Func<string, float> f = key => Convert.ToSingle(m[key], CultureInfo.InvariantCulture);
+            object e;
+            Target element = null;
+            if (m.TryGetValue("element", out e))
+            {
+                var t = (Dictionary<string, object>)e;
+                element = new Target { Type = (string)t["type"], Name = (string)t["name"], Path = (string)t["path"], Shown = (string)t["shown"], Own = (string)t["own"] };
+            }
+            return new Mark(new RectangleF(f("x"), f("y"), f("width"), f("height")), element);
+        }
+
+        static Dictionary<string, object> Pack(Mark mark)
+        {
+            var m = new Dictionary<string, object> { { "x", mark.Box.X }, { "y", mark.Box.Y }, { "width", mark.Box.Width }, { "height", mark.Box.Height } };
+            var t = mark.Element;
+            if (t != null)
+                m["element"] = new Dictionary<string, object> { { "type", t.Type }, { "name", t.Name }, { "path", t.Path }, { "shown", t.Shown }, { "own", t.Own } };
+            return m;
+        }
+
+        // Every change to the notes is on disk before the person does the next thing.
+        void Store()
+        {
+            if (folder == null) return;
+            var notes = new List<object>();
+            foreach (var note in Notes)
+                notes.Add(new Dictionary<string, object>
+                {
+                    { "number", note.Number }, { "kind", Note.Keys[(int)note.Kind] }, { "text", note.Text }, { "author", note.Author },
+                    { "marks", note.Marks.ConvertAll(m => (object)Pack(m)) },
+                });
+            Write(NotesFile, Json().Serialize(new Dictionary<string, object> { { "notes", notes } }));
         }
 
         static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }; }
 
         // Written beside the file and then swapped in, so a crash in between leaves the old
-        // round or the new one, never half of one. Should the disk refuse, the round still
-        // waits in memory.
-        void Keep(Round round)
+        // content or the new one, never half of it. Should the disk refuse, what was to be
+        // written still waits in memory.
+        static void Write(string file, string text)
         {
-            if (file == null) return;
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(file));
                 var part = file + ".part";
-                File.WriteAllText(part, Json().Serialize(round.Fields), new UTF8Encoding(false));
+                File.WriteAllText(part, text, new UTF8Encoding(false));
                 if (File.Exists(file)) File.Replace(part, file, null);
                 else File.Move(part, file);
             }
@@ -2347,15 +2440,14 @@ namespace KnightSight
             catch (UnauthorizedAccessException) { }
         }
 
-        void Drop()
+        static void Delete(string file)
         {
-            if (file == null) return;
             try { File.Delete(file); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
 
-        public bool Fetched { get { lock (this) return sent != null && read; } }
+        public bool Fetched { get { lock (this) return latest != null && handed >= latest.Number; } }
 
         public int Next { get { return next; } }
 
@@ -2367,17 +2459,37 @@ namespace KnightSight
 
         public void Close() { Open = false; }
 
+        // The notes left from the last run go to the first share chosen, most likely the one
+        // they were pinned to.
         public void Forget()
         {
-            Notes.Clear();
+            if (Restored) Restored = false;
+            else Notes.Clear();
             Open = false;
+            Store();
         }
 
         public Note Add(IList<Mark> marks, NoteKind kind, string text, string author)
         {
             var note = new Note { Number = next++, Kind = kind, Text = text, Author = author, Marks = new List<Mark>(marks) };
             Notes.Add(note);
+            Store();
             return note;
+        }
+
+        public void Update(Note note, IList<Mark> marks, NoteKind kind, string text, string author)
+        {
+            note.Marks = new List<Mark>(marks);
+            note.Kind = kind;
+            note.Text = text;
+            note.Author = author;
+            Store();
+        }
+
+        public void Remove(Note note)
+        {
+            Notes.Remove(note);
+            Store();
         }
 
         // The shot is the share at its full size, so a mark at density 1.5 sits at one and a
@@ -2477,27 +2589,45 @@ namespace KnightSight
         {
             lock (this)
             {
-                Keep(round);
-                sent = round;
-                read = false;
-                rounds = round.Number;
+                if (folder != null)
+                {
+                    round.Kept = Path.Combine(folder, "sent", round.Number.ToString(CultureInfo.InvariantCulture) + ".json");
+                    Write(round.Kept, Json().Serialize(round.Fields));
+                }
+                Queue(round);
+                latest = round;
             }
             if (!round.KeepsNotes) Notes.Clear();
             Open = false;
+            Store();
         }
 
-        // With unread set, a round already handed out answers with its number alone, which is
-        // what the MCP server waits on.
-        public Dictionary<string, object> Answer(bool unread)
+        // The oldest round the assistant has not confirmed yet. Without one, unread answers with
+        // the number of the last round alone, which is what the MCP server waits on, and a plain
+        // ask brings the last round again.
+        public Dictionary<string, object> Answer(bool unread, bool confirms = false)
         {
             lock (this)
             {
-                if (sent == null) return new Dictionary<string, object> { { "round", 0 } };
-                if (unread && read) return new Dictionary<string, object> { { "round", sent.Number } };
-                if (!read) Drop();
-                read = true;
-                return sent.Fields;
+                if (waiting.Count == 0)
+                    return unread || latest == null ? new Dictionary<string, object> { { "round", rounds } } : latest.Fields;
+                var round = waiting[0];
+                handed = Math.Max(handed, round.Number);
+                if (!confirms) Settle(round.Number);
+                return round.Fields;
             }
+        }
+
+        public void Confirm(int number) { lock (this) Settle(number); }
+
+        void Settle(int number)
+        {
+            waiting.RemoveAll(r =>
+            {
+                if (r.Number > number) return false;
+                if (r.Kept != null) Delete(r.Kept);
+                return true;
+            });
         }
 
         // One file with the pictures inside, for when there is no assistant to fetch the notes.
@@ -3815,13 +3945,7 @@ namespace KnightSight
         {
             Author = editor.Author;
             if (editor.Note == null) board.Add(marks, editor.Kind, editor.NoteText, editor.Author);
-            else
-            {
-                editor.Note.Marks = new List<Mark>(marks);
-                editor.Note.Kind = editor.Kind;
-                editor.Note.Text = editor.NoteText;
-                editor.Note.Author = editor.Author;
-            }
+            else board.Update(editor.Note, marks, editor.Kind, editor.NoteText, editor.Author);
             CloseNote();
         }
 
@@ -3832,7 +3956,7 @@ namespace KnightSight
 
         void Delete()
         {
-            board.Notes.Remove(editor.Note);
+            board.Remove(editor.Note);
             CloseNote();
         }
 
@@ -3868,7 +3992,7 @@ namespace KnightSight
             toggle = new SoftButton { Primary = true, Icon = Glyph.Start }, info = new SoftButton { Blank = true, Icon = Glyph.Info },
             minimise = new SoftButton { Blank = true, Icon = Glyph.Minimise }, close = new SoftButton { Blank = true, Icon = Glyph.Close },
             pin = new SoftButton { Icon = Glyph.Pin };
-        readonly Board board = new Board(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KnightSight", "round.json"));
+        readonly Board board = new Board(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KnightSight"));
         readonly Pinboard pinboard;
         readonly ToolTip tip = new ToolTip { OwnerDraw = true, AutoPopDelay = 20000, InitialDelay = 200 };
         readonly Font titleFont, bodyFont, tipFont;
@@ -4205,7 +4329,7 @@ namespace KnightSight
             var c = chosen;
             string head = c == null ? Say.NothingChosen : c.Window != IntPtr.Zero ? Win.Title(c.Window) : c.Title, sub;
             if (picking) sub = Say.ClickTarget;
-            else if (c == null) sub = Say.ChooseTarget;
+            else if (c == null) sub = board.Restored ? Say.FromLastTime(board.Notes.Count) : Say.ChooseTarget;
             else if (active && board.Open) sub = Say.PinboardOn;
             else if (active && working) sub = Say.Doing + doing;
             else if (active && sentNote != null) sub = board.Fetched ? Say.Fetched : sentNote;
@@ -4574,26 +4698,33 @@ namespace KnightSight
         }
 
         // Loopback only: the port is reached through an SSH tunnel, never from the network.
-        void ServePort()
+        void ServePort() { Listen(Port, TimeSpan.FromSeconds(2), Talk); }
+
+        // Another program may hold the port, such as a KnightSight that is still closing, and
+        // the assistant would find nobody behind it. So the port is tried again until it is free.
+        public static void Listen(int port, TimeSpan retry, Action<Stream> talk)
         {
-            TcpListener listener;
-            try
-            {
-                listener = new TcpListener(IPAddress.Loopback, Port);
-                listener.Start();
-            }
-            catch (SocketException) { return; }
             while (true)
             {
-                var client = listener.AcceptTcpClient();
-                new Thread(() =>
+                var listener = new TcpListener(IPAddress.Loopback, port);
+                try { listener.Start(); }
+                catch (SocketException) { Thread.Sleep(retry); continue; }
+                try
                 {
-                    using (client)
+                    while (true)
                     {
-                        try { Talk(client.GetStream()); }
-                        catch (IOException) { }
+                        var client = listener.AcceptTcpClient();
+                        new Thread(() =>
+                        {
+                            using (client)
+                            {
+                                try { talk(client.GetStream()); }
+                                catch (IOException) { }
+                            }
+                        }) { IsBackground = true }.Start();
                     }
-                }) { IsBackground = true }.Start();
+                }
+                catch (SocketException) { listener.Stop(); }
             }
         }
 
@@ -4652,7 +4783,9 @@ namespace KnightSight
                 // anything is shared, and fetching them is no work on the share.
                 if (args.TryGetValue("cmd", out asked) && "notes".Equals(asked))
                 {
-                    foreach (var field in board.Answer(Flag(args, "unread"))) reply[field.Key] = field.Value;
+                    object read;
+                    if (args.TryGetValue("read", out read)) board.Confirm(Convert.ToInt32(read, CultureInfo.InvariantCulture));
+                    else foreach (var field in board.Answer(Flag(args, "unread"), Flag(args, "confirm"))) reply[field.Key] = field.Value;
                     reply["ok"] = true;
                     return json.Serialize(reply);
                 }

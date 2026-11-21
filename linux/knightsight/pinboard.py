@@ -216,8 +216,7 @@ class Column(Gtk.Box):
             except OSError:
                 pass
         if self.open is not None:
-            o = self.open
-            o.kind, o.text, o.author, o.marks = self.kind, text, author, self.draft.marks
+            self.board.update(self.open, self.kind, text, author, self.draft.marks)
         else:
             self.board.add(self.kind, text, author, self.draft.marks)
         self.close_editor()

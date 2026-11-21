@@ -127,7 +127,11 @@ public final class Responder {
         guard let request = Request(line) else { throw Refused("The request is not a JSON object.") }
         // The person sent the notes on purpose, so they go out whether or not anything is
         // shared. Fetching them is no work to show, as the MCP server asks every second.
-        if (try? request.text("cmd")) == "notes" { return notes(unread: request.flag("unread")) }
+        if (try? request.text("cmd")) == "notes" {
+            guard let read = try? request.number("read") else { return notes(unread: request.flag("unread"), confirms: request.flag("confirm")) }
+            desk.board.confirm(Int(read))
+            return Reply()
+        }
         guard var share = desk.currentShare() else { throw Refused.nothingShared }
         if !share.reachable, desk.bringBack(), let back = desk.currentShare() { share = back }
         guard share.reachable else { throw Refused("The shared window is minimized, hidden or on another desktop.") }
@@ -186,8 +190,8 @@ public final class Responder {
         return try share.screenPoint(x: request.number("x"), y: request.number("y"))
     }
 
-    private func notes(unread: Bool) -> Reply {
-        let (number, latest) = desk.board.fetch(unread: unread)
+    private func notes(unread: Bool, confirms: Bool) -> Reply {
+        let (number, latest) = desk.board.fetch(unread: unread, confirms: confirms)
         var reply = Reply()
         reply.round = number
         guard let round = latest else { return reply }

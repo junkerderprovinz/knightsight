@@ -235,6 +235,14 @@ class Notes(unittest.TestCase):
         self.assertEqual(ask(panel, cmd="notes", unread=True), {"ok": True, "round": 1})
         self.assertEqual(ask(panel, cmd="notes")["title"], "Test")
 
+    def test_a_confirmed_round_is_not_handed_out_again(self):
+        panel = Panel()
+        panel.rounds.send({"title": "Test", "notes": []})
+        self.assertEqual(ask(panel, cmd="notes", unread=True, confirm=True)["title"], "Test")
+        self.assertEqual(ask(panel, cmd="notes", unread=True, confirm=True)["title"], "Test")
+        self.assertEqual(ask(panel, cmd="notes", read=1), {"ok": True})
+        self.assertEqual(ask(panel, cmd="notes", unread=True, confirm=True), {"ok": True, "round": 1})
+
     def test_a_note_arrives_with_its_marks(self):
         panel = Panel(shared=False)
         note = notes.Note(3, "bug", "Too tight", "Junker", [notes.Mark(120, 80, 160, 40), notes.Mark(400, 300)])

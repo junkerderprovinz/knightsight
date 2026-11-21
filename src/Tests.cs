@@ -187,13 +187,13 @@ namespace KnightSight
         static void InFolder(Action<string> test)
         {
             var folder = Path.Combine(Path.GetTempPath(), "knightsight-" + Guid.NewGuid().ToString("N"));
-            try { test(Path.Combine(folder, "round.json")); }
+            try { test(folder); }
             finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
         }
 
-        static Dictionary<string, object> SendTo(Board board, bool approved = false)
+        static Dictionary<string, object> SendTo(Board board, bool approved = false, string text = "Cut off")
         {
-            board.Add(Marks(new RectangleF(10, 10, 20, 20)), NoteKind.Bug, "Cut off", "Junker");
+            board.Add(Marks(new RectangleF(10, 10, 20, 20)), NoteKind.Bug, text, "Junker");
             Round round;
             using (var bmp = new Bitmap(100, 100)) round = board.Seal(bmp, 1, "t", DateTime.UtcNow, approved);
             board.Send(round);
@@ -202,46 +202,222 @@ namespace KnightSight
 
         static void SentRoundWaitsForTheAssistantAcrossARestart()
         {
-            InFolder(file =>
+            InFolder(folder =>
             {
                 var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
-                var sent = json.Serialize(SendTo(new Board(file), true));
-                var waiting = new Board(file).Answer(true);
+                var sent = json.Serialize(SendTo(new Board(folder), true));
+                var waiting = new Board(folder).Answer(true, true);
                 Same("Cut off", Field(waiting, 0)["text"]);
                 Same(sent, json.Serialize(waiting));
             });
         }
 
-        static void FetchedRoundIsNotKeptForTheNextStart()
+        static void RoundWaitsOnDiskUntilTheAssistantConfirmsIt()
         {
-            InFolder(file =>
+            InFolder(folder =>
             {
-                var board = new Board(file);
+                var board = new Board(folder);
+                SendTo(board);
+                True(board.Answer(true, true).ContainsKey("notes"), "handed out");
+                True(new Board(folder).Answer(true, true).ContainsKey("notes"), "still there after a restart");
+                board.Confirm(1);
+                Same(1, new Board(folder).Answer(true, true).Count);
+            });
+        }
+
+        static void UnconfirmedRoundIsHandedOutAgain()
+        {
+            InFolder(folder =>
+            {
+                var board = new Board(folder);
+                SendTo(board);
+                board.Answer(true, true);
+                True(board.Answer(true, true).ContainsKey("notes"), "an answer lost on the way comes again");
+                board.Confirm(1);
+                var after = board.Answer(true, true);
+                Same(1, after.Count);
+                Same(1, after["round"]);
+            });
+        }
+
+        static void RoundIsDroppedOnceHandedOutWhenTheAssistantDoesNotConfirm()
+        {
+            InFolder(folder =>
+            {
+                var board = new Board(folder);
                 SendTo(board);
                 board.Answer(true);
-                Same(0, new Board(file).Answer(false)["round"]);
+                Same(1, new Board(folder).Answer(true).Count);
+            });
+        }
+
+        static void RoundsSentBeforeAnyIsFetchedWaitInTurn()
+        {
+            InFolder(folder =>
+            {
+                var board = new Board(folder);
+                SendTo(board, text: "first");
+                SendTo(board, text: "second");
+                var restarted = new Board(folder);
+                var first = restarted.Answer(true, true);
+                Same(1, first["round"]);
+                Same("first", Field(first, 0)["text"]);
+                restarted.Confirm(1);
+                var second = restarted.Answer(true, true);
+                Same(2, second["round"]);
+                Same("second", Field(second, 0)["text"]);
             });
         }
 
         static void RoundsCountOnFromTheOneThatWaited()
         {
-            InFolder(file =>
+            InFolder(folder =>
             {
-                SendTo(new Board(file));
-                var board = new Board(file);
+                SendTo(new Board(folder));
+                var board = new Board(folder);
                 SendTo(board);
-                Same(2, board.Answer(true)["round"]);
+                board.Confirm(1);
+                Same(2, board.Answer(true, true)["round"]);
+            });
+        }
+
+        static void RoundInTheEarlierFileIsHandedOutAndConfirmed()
+        {
+            InFolder(folder =>
+            {
+                Directory.CreateDirectory(folder);
+                var file = Path.Combine(folder, "round.json");
+                File.WriteAllText(file, "{\"round\":4,\"title\":\"t\",\"notes\":[]}");
+                var board = new Board(folder);
+                Same(4, board.Answer(true, true)["round"]);
+                board.Confirm(4);
+                True(!File.Exists(file), "the confirmed round leaves the disk");
             });
         }
 
         static void UnreadableRoundFileCountsAsNothingSent()
         {
-            InFolder(file =>
+            InFolder(folder =>
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(file));
-                File.WriteAllText(file, "{not json");
-                Same(0, new Board(file).Answer(false)["round"]);
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(Path.Combine(folder, "round.json"), "{not json");
+                Same(0, new Board(folder).Answer(false)["round"]);
             });
+        }
+
+        static void PinnedNoteIsBackAfterARestart()
+        {
+            InFolder(folder =>
+            {
+                var element = new Target { Type = "button", Name = "Save", Path = "window \"Notes\" > button \"Save\"", Shown = "Schaltfläche „Save“", Own = "Schaltfläche „Save“" };
+                new Board(folder).Add(new[] { new Mark(new RectangleF(10.5f, 20, 30, 40), element), new Mark(new RectangleF(5, 6, 0, 0)) }, NoteKind.Question, "Why two?", "Junker");
+                var notes = new Board(folder).Notes;
+                Same(1, notes.Count);
+                var note = notes[0];
+                Same(1, note.Number);
+                Same(NoteKind.Question, note.Kind);
+                Same("Why two?", note.Text);
+                Same("Junker", note.Author);
+                Same(new RectangleF(10.5f, 20, 30, 40), note.Marks[0].Box);
+                Same("window \"Notes\" > button \"Save\"", note.Marks[0].Element.Path);
+                Same("Schaltfläche „Save“", note.Marks[0].Element.Shown);
+                True(note.Marks[1].Pin && note.Marks[1].Element == null, "the pin comes back as a pin");
+            });
+        }
+
+        static void EditedNoteIsKeptAsEdited()
+        {
+            InFolder(folder =>
+            {
+                var board = new Board(folder);
+                var note = board.Add(Marks(new RectangleF(1, 2, 3, 4)), NoteKind.Wish, "first", "");
+                board.Update(note, Marks(new RectangleF(5, 6, 7, 8)), NoteKind.Bug, "second", "Junker");
+                var back = new Board(folder).Notes[0];
+                Same("second", back.Text);
+                Same(NoteKind.Bug, back.Kind);
+                Same("Junker", back.Author);
+                Same(new RectangleF(5, 6, 7, 8), back.Marks[0].Box);
+            });
+        }
+
+        static void DeletedNoteStaysGoneAfterARestart()
+        {
+            InFolder(folder =>
+            {
+                var board = new Board(folder);
+                var gone = board.Add(Marks(new RectangleF(1, 2, 3, 4)), NoteKind.Wish, "gone", "");
+                board.Add(Marks(new RectangleF(1, 2, 3, 4)), NoteKind.Wish, "kept", "");
+                board.Remove(gone);
+                var notes = new Board(folder).Notes;
+                Same(1, notes.Count);
+                Same("kept", notes[0].Text);
+            });
+        }
+
+        static void SentNotesLeaveThePinboardForGood()
+        {
+            InFolder(folder =>
+            {
+                SendTo(new Board(folder));
+                Same(0, new Board(folder).Notes.Count);
+            });
+        }
+
+        static void NumbersCountOnFromTheNotesThatCameBack()
+        {
+            InFolder(folder =>
+            {
+                var board = new Board(folder);
+                board.Add(Marks(new RectangleF(1, 2, 3, 4)), NoteKind.Wish, "one", "");
+                board.Add(Marks(new RectangleF(1, 2, 3, 4)), NoteKind.Wish, "two", "");
+                Same(3, new Board(folder).Next);
+            });
+        }
+
+        static void NotesFromLastTimeStayForTheFirstShare()
+        {
+            InFolder(folder =>
+            {
+                new Board(folder).Add(Marks(new RectangleF(1, 2, 3, 4)), NoteKind.Wish, "from last time", "");
+                var board = new Board(folder);
+                True(board.Restored, "the panel can tell they are from last time");
+                board.Forget();
+                Same(1, board.Notes.Count);
+                True(!board.Restored, "the share chosen now owns them");
+                board.Forget();
+                Same(0, board.Notes.Count);
+                Same(0, new Board(folder).Notes.Count);
+            });
+        }
+
+        static void UnreadableNotesFileStartsAnEmptyPinboard()
+        {
+            InFolder(folder =>
+            {
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(Path.Combine(folder, "notes.json"), "{\"notes\": [{\"number\": \"x\"}]}");
+                var board = new Board(folder);
+                Same(0, board.Notes.Count);
+                True(!board.Restored, "nothing to bring back");
+            });
+        }
+
+        static void PortIsTakenOnceAnotherProgramLetsItGo()
+        {
+            var holder = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            holder.Start();
+            int port = ((IPEndPoint)holder.LocalEndpoint).Port;
+            var served = new System.Threading.ManualResetEventSlim();
+            new System.Threading.Thread(() => Panel.Listen(port, TimeSpan.FromMilliseconds(50), stream => served.Set())) { IsBackground = true }.Start();
+            System.Threading.Thread.Sleep(200);
+            holder.Stop();
+            var until = DateTime.UtcNow.AddSeconds(5);
+            while (!served.IsSet && DateTime.UtcNow < until)
+            {
+                try { using (new System.Net.Sockets.TcpClient("127.0.0.1", port)) served.Wait(500); }
+                catch (System.Net.Sockets.SocketException) { System.Threading.Thread.Sleep(50); }
+            }
+            True(served.IsSet, "the panel answers on the port once it is free");
         }
 
         static void RoundCountsAsFetchedOnceHandedOut()

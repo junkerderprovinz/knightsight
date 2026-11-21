@@ -411,6 +411,14 @@ final class ResponderTests: XCTestCase {
         XCTAssertNotNil(try ask(["cmd": "notes"])["notes"])
     }
 
+    func testAConfirmedRoundIsNotHandedOutAgain() throws {
+        send([Note(number: 1, kind: .wish, text: "Bigger, please.", author: "", marks: [CGRect(x: 10, y: 10, width: 20, height: 20)])])
+        XCTAssertNotNil(try ask(["cmd": "notes", "unread": true, "confirm": true])["notes"])
+        XCTAssertNotNil(try ask(["cmd": "notes", "unread": true, "confirm": true])["notes"])
+        XCTAssertEqual(try ask(["cmd": "notes", "read": 1])["ok"] as? Bool, true)
+        XCTAssertNil(try ask(["cmd": "notes", "unread": true, "confirm": true])["notes"])
+    }
+
     func testAMarkOutsideTheShareComesWithoutACrop() throws {
         send([Note(number: 1, kind: .bug, text: "Gone.", author: "", marks: [CGRect(x: 900, y: 10, width: 20, height: 20)])])
         let notes = try XCTUnwrap(try ask(["cmd": "notes"])["notes"] as? [[String: Any]])

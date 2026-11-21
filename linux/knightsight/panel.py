@@ -65,8 +65,9 @@ class Panel(Gtk.ApplicationWindow):
         self.last_click = None
         self.last_tick = time.monotonic()
         self.last_error = None
-        self.board = notes.Board()
-        self.rounds = notes.Rounds(os.path.join(GLib.get_user_state_dir(), "knightsight", "round.json"))
+        state = os.path.join(GLib.get_user_state_dir(), "knightsight")
+        self.board = notes.Board(os.path.join(state, "notes.json"))
+        self.rounds = notes.Rounds(state)
         self.pinboard = None
         self.toggle_gate = notes.Gate(TOGGLE_SPAN)
         self.board_notice = None
@@ -164,7 +165,7 @@ class Panel(Gtk.ApplicationWindow):
         if self.picking:
             sub = self.pick_hint
         elif c is None:
-            sub = self.notice or say.CHOOSE_TARGET
+            sub = self.notice or (say.from_last_time(len(self.board.notes)) if self.board.restored else say.CHOOSE_TARGET)
         elif self.active and self.working_now:
             sub = say.DOING + self.doing
         elif self.pinboard is not None:
@@ -231,7 +232,7 @@ class Panel(Gtk.ApplicationWindow):
             self.chosen = share
             self.preview = None
             self.preview_due = 0.0
-            self.board.clear()
+            self.board.forget()
         self.notice = notice
         self.set_visible(True)
         self.present()

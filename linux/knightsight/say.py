@@ -91,6 +91,14 @@ FILE_KIND = pick("Pinboard notes", "Pinnwand-Notizen")
 FILE_NAME = pick("knightsight-notes.html", "knightsight-notizen.html")
 
 
+def from_last_time(count):
+    if count == 1:
+        return pick("1 note from last time is waiting. Share the same window or region again to see it.",
+                    "1 Notiz vom letzten Mal wartet. Gib dasselbe Fenster oder denselben Bereich wieder frei, dann siehst du sie.")
+    return pick(f"{count} notes from last time are waiting. Share the same window or region again to see them.",
+                f"{count} Notizen vom letzten Mal warten. Gib dasselbe Fenster oder denselben Bereich wieder frei, dann siehst du sie.")
+
+
 def sent(count):
     if count == 1:
         return pick("Sent 1 note. Your assistant can fetch it now.",

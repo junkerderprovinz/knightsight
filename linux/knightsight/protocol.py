@@ -213,7 +213,10 @@ def reply(line, panel):
         # The person sent these on purpose, shared or not, and the MCP server polls for them
         # every second while it waits, so they are no work that lights the frame.
         if args.get("cmd") == "notes":
-            return json.dumps(panel.rounds.answer(flag(args, "unread")))
+            if "read" in args:
+                panel.rounds.confirm(int(args["read"]))
+                return json.dumps({"ok": True})
+            return json.dumps(panel.rounds.answer(flag(args, "unread"), flag(args, "confirm")))
         share = panel.share()
         if share is None:
             raise Refused(NOTHING_SHARED)

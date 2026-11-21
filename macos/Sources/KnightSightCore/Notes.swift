@@ -144,35 +144,60 @@ extension Share {
     }
 }
 
-/// The unsent notes and the latest round. The panel writes, the threads serving the
-/// port read. A round not fetched yet also waits in the file, so KnightSight ending or
-/// crashing before the assistant asks does not lose it.
+/// The unsent notes and the rounds sent. The panel writes, the threads serving the port read.
+/// Both live in the folder as well, so KnightSight ending or crashing loses neither: the notes
+/// come back onto the pinboard, and a round waits there until the assistant confirms it has
+/// read it. An assistant that does not confirm gets a round once.
 public final class Board {
-    private let lock = NSLock()
-    private let file: URL?
-    private var stored: [Note] = []
-    private var lastNumber = 0
-    private var latest: Round?
-    private var read = false
-
-    public init(file: URL? = nil) {
-        self.file = file
-        if let file, let data = try? Data(contentsOf: file) {
-            latest = try? JSONDecoder().decode(Round.self, from: data)
-        }
+    private struct Pinned: Codable {
+        let notes: [Note]
     }
 
-    /// Written beside the file and then swapped in, so a crash in between leaves the old round
-    /// or the new one, never half of one. Should the disk refuse, the round still waits in memory.
-    private func keep(_ round: Round) {
-        guard let file, let data = try? JSONEncoder().encode(round) else { return }
+    private let lock = NSLock()
+    private let folder: URL?
+    private var stored: [Note] = []
+    private var lastNumber = 0
+    private var waiting: [(round: Round, file: URL?)] = []
+    private var latest: Round?
+    private var handed = 0
+    private var cameBack = false
+
+    public init(folder: URL? = nil) {
+        self.folder = folder
+        guard let folder else { return }
+        if let data = try? Data(contentsOf: folder.appendingPathComponent("notes.json")),
+           let pinned = try? JSONDecoder().decode(Pinned.self, from: data) {
+            stored = pinned.notes
+            lastNumber = stored.map(\.number).max() ?? 0
+            cameBack = !stored.isEmpty
+        }
+        waiting = Board.waiting(in: folder)
+        latest = waiting.last?.round
+    }
+
+    /// Each round waits in a file named by its number. round.json is where 1.1.2 kept its
+    /// single round.
+    private static func waiting(in folder: URL) -> [(round: Round, file: URL?)] {
+        let sent = folder.appendingPathComponent("sent")
+        let files = [folder.appendingPathComponent("round.json")]
+            + ((try? FileManager.default.contentsOfDirectory(at: sent, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "json" }
+        return files.compactMap { file -> (round: Round, file: URL?)? in
+            guard let data = try? Data(contentsOf: file), let round = try? JSONDecoder().decode(Round.self, from: data) else { return nil }
+            return (round, file)
+        }.sorted { $0.round.number < $1.round.number }
+    }
+
+    /// Written beside the file and then swapped in, so a crash in between leaves the old
+    /// content or the new one, never half of it. Should the disk refuse, it still waits in memory.
+    private static func write<T: Encodable>(_ value: T, to file: URL) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: file, options: .atomic)
     }
 
-    private func drop() {
-        guard let file else { return }
-        try? FileManager.default.removeItem(at: file)
+    private func keepNotes() {
+        guard let folder else { return }
+        Board.write(Pinned(notes: stored), to: folder.appendingPathComponent("notes.json"))
     }
 
     private func locked<T>(_ body: () -> T) -> T {
@@ -184,6 +209,9 @@ public final class Board {
     /// By number.
     public var notes: [Note] { locked { stored } }
 
+    /// Notes from the last run that no share has taken over yet.
+    public var restored: Bool { locked { cameBack } }
+
     /// Numbers count on for as long as the app runs, across rounds.
     @discardableResult
     public func add(_ kind: NoteKind, _ text: String, author: String, marks: [CGRect]) -> Note {
@@ -191,6 +219,7 @@ public final class Board {
             lastNumber += 1
             let note = Note(number: lastNumber, kind: kind, text: text, author: author, marks: marks)
             stored.append(note)
+            keepNotes()
             return note
         }
     }
@@ -202,46 +231,78 @@ public final class Board {
             stored[i].text = text
             stored[i].author = author
             stored[i].marks = marks
+            keepNotes()
         }
     }
 
     public func remove(_ number: Int) {
-        locked { stored.removeAll { $0.number == number } }
+        locked {
+            stored.removeAll { $0.number == number }
+            keepNotes()
+        }
     }
 
     /// Drops the unsent notes. Their numbers stay used.
     public func clear() {
-        locked { stored.removeAll() }
+        locked {
+            stored.removeAll()
+            keepNotes()
+        }
+    }
+
+    /// Drops the notes when another share is chosen. The ones from the last run go to the
+    /// first share chosen, most likely the one they were pinned to.
+    public func forget() {
+        locked {
+            if cameBack { cameBack = false } else { stored.removeAll() }
+            keepNotes()
+        }
     }
 
     public var nextRound: Int { locked { (latest?.number ?? 0) + 1 } }
 
-    /// Keeps the round as the latest one, unread, and takes its notes off the board. A note
+    /// Keeps the round until the assistant has it and takes its notes off the board. A note
     /// added while the round was being pictured stays.
     public func send(_ round: Round) {
         locked {
             let sent = Set(round.entries.map(\.note.number))
             stored.removeAll { sent.contains($0.number) }
             latest = round
-            read = false
-            keep(round)
+            let file = folder?.appendingPathComponent("sent/\(round.number).json")
+            if let file { Board.write(round, to: file) }
+            waiting.append((round, file))
+            keepNotes()
         }
     }
 
     public func fetched(_ round: Int) -> Bool {
-        locked { latest?.number == round && read }
+        locked { latest?.number == round && handed >= round }
     }
 
-    /// The latest round's number, 0 before the first, and the round itself unless only an
-    /// unread one is wanted and this one was handed out before. Handing it out marks it read.
-    public func fetch(unread: Bool) -> (number: Int, round: Round?) {
+    /// The oldest round not confirmed yet. Without one, the last round's number, 0 before the
+    /// first, and the round itself unless only an unread one is wanted. An assistant that does
+    /// not confirm has the round once it is handed out.
+    public func fetch(unread: Bool, confirms: Bool = false) -> (number: Int, round: Round?) {
         locked {
-            guard let latest else { return (0, nil) }
-            if unread && read { return (latest.number, nil) }
-            if !read { drop() }
-            read = true
-            return (latest.number, latest)
+            guard let first = waiting.first?.round else {
+                guard let latest else { return (0, nil) }
+                return unread ? (latest.number, nil) : (latest.number, latest)
+            }
+            handed = max(handed, first.number)
+            if !confirms { settle(first.number) }
+            return (first.number, first)
         }
+    }
+
+    public func confirm(_ round: Int) {
+        locked { settle(round) }
+    }
+
+    private func settle(_ round: Int) {
+        for done in waiting where done.round.number <= round {
+            if let file = done.file { try? FileManager.default.removeItem(at: file) }
+        }
+        waiting.removeAll { $0.round.number <= round }
     }
 }
 

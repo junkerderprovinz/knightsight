@@ -35,12 +35,14 @@ final class PinboardTests: XCTestCase {
         XCTAssertEqual(board.notes.map(\.text), ["Two"])
     }
 
-    func testRoundsCountUpAndOnlyTheLatestIsKept() {
+    func testRoundsCountUpAndTheLatestComesBackOnceAllAreFetched() {
         let board = Board()
         XCTAssertEqual(board.nextRound, 1)
         board.send(round([note(.zero)], number: board.nextRound))
         board.send(round([note(.zero, number: 2)], number: board.nextRound))
         XCTAssertEqual(board.nextRound, 3)
+        XCTAssertEqual(board.fetch(unread: true).number, 1)
+        XCTAssertEqual(board.fetch(unread: true).number, 2)
         let (number, latest) = board.fetch(unread: false)
         XCTAssertEqual(number, 2)
         XCTAssertEqual(latest?.entries.map(\.note.number), [2])
@@ -56,17 +58,17 @@ final class PinboardTests: XCTestCase {
         XCTAssertFalse(board.fetched(2))
     }
 
-    func roundFile() -> URL {
+    func tempFolder() -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("knightsight-\(UUID().uuidString)")
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
-        return folder.appendingPathComponent("round.json")
+        return folder
     }
 
     func testASentRoundWaitsForTheAssistantAcrossARestart() {
-        let file = roundFile()
+        let folder = tempFolder()
         let sent = note(box, pin, number: 3, kind: .bug, text: "Cut off", author: "Junker")
-        Board(file: file).send(round([sent], number: 2))
-        let (number, latest) = Board(file: file).fetch(unread: true)
+        Board(folder: folder).send(round([sent], number: 2))
+        let (number, latest) = Board(folder: folder).fetch(unread: true, confirms: true)
         XCTAssertEqual(number, 2)
         XCTAssertEqual(latest?.title, "notes.txt")
         XCTAssertEqual(latest?.image, Data([7]))
@@ -75,25 +77,132 @@ final class PinboardTests: XCTestCase {
         XCTAssertEqual(latest?.entries.first?.marks.map(\.image), [Data([9]), Data([9])])
     }
 
-    func testAFetchedRoundIsNotKeptForTheNextStart() {
-        let file = roundFile()
-        let board = Board(file: file)
+    func testARoundWaitsOnDiskUntilTheAssistantConfirmsIt() {
+        let folder = tempFolder()
+        let board = Board(folder: folder)
+        board.send(round([note(.zero)]))
+        XCTAssertNotNil(board.fetch(unread: true, confirms: true).round)
+        XCTAssertNotNil(Board(folder: folder).fetch(unread: true, confirms: true).round)
+        board.confirm(1)
+        XCTAssertNil(Board(folder: folder).fetch(unread: true, confirms: true).round)
+    }
+
+    func testAnUnconfirmedRoundIsHandedOutAgain() {
+        let board = Board(folder: tempFolder())
+        board.send(round([note(.zero)]))
+        _ = board.fetch(unread: true, confirms: true)
+        XCTAssertNotNil(board.fetch(unread: true, confirms: true).round)
+        board.confirm(1)
+        let after = board.fetch(unread: true, confirms: true)
+        XCTAssertEqual(after.number, 1)
+        XCTAssertNil(after.round)
+    }
+
+    func testARoundIsDroppedOnceHandedOutWhenTheAssistantDoesNotConfirm() {
+        let folder = tempFolder()
+        let board = Board(folder: folder)
         board.send(round([note(.zero)]))
         _ = board.fetch(unread: true)
-        XCTAssertEqual(Board(file: file).fetch(unread: false).number, 0)
+        XCTAssertEqual(Board(folder: folder).fetch(unread: false).number, 0)
+    }
+
+    func testRoundsSentBeforeAnyIsFetchedWaitInTurn() {
+        let folder = tempFolder()
+        let board = Board(folder: folder)
+        board.send(round([note(.zero, text: "first")], number: 1))
+        board.send(round([note(.zero, number: 2, text: "second")], number: 2))
+        let restarted = Board(folder: folder)
+        XCTAssertEqual(restarted.fetch(unread: true, confirms: true).round?.entries.map(\.note.text), ["first"])
+        restarted.confirm(1)
+        XCTAssertEqual(restarted.fetch(unread: true, confirms: true).round?.entries.map(\.note.text), ["second"])
     }
 
     func testRoundsCountOnFromTheOneThatWaited() {
-        let file = roundFile()
-        Board(file: file).send(round([note(.zero)]))
-        XCTAssertEqual(Board(file: file).nextRound, 2)
+        let folder = tempFolder()
+        Board(folder: folder).send(round([note(.zero)]))
+        XCTAssertEqual(Board(folder: folder).nextRound, 2)
+    }
+
+    func testARoundInTheEarlierFileIsHandedOutAndConfirmed() throws {
+        let folder = tempFolder()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("round.json")
+        try JSONEncoder().encode(round([note(.zero)], number: 4)).write(to: file)
+        let board = Board(folder: folder)
+        XCTAssertEqual(board.fetch(unread: true, confirms: true).number, 4)
+        board.confirm(4)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
     }
 
     func testAnUnreadableFileCountsAsNothingSent() throws {
-        let file = roundFile()
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("{not json".utf8).write(to: file)
-        XCTAssertEqual(Board(file: file).fetch(unread: false).number, 0)
+        let folder = tempFolder()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("{not json".utf8).write(to: folder.appendingPathComponent("round.json"))
+        XCTAssertEqual(Board(folder: folder).fetch(unread: false).number, 0)
+    }
+
+    func testAPinnedNoteIsBackAfterARestart() {
+        let folder = tempFolder()
+        Board(folder: folder).add(.question, "Why two?", author: "Junker", marks: [box, pin])
+        XCTAssertEqual(Board(folder: folder).notes, [Note(number: 1, kind: .question, text: "Why two?", author: "Junker", marks: [box, pin])])
+    }
+
+    func testAnEditedNoteIsKeptAsEdited() {
+        let folder = tempFolder()
+        let board = Board(folder: folder)
+        let added = board.add(.wish, "first", author: "", marks: [box])
+        board.update(added.number, kind: .bug, text: "second", author: "Junker", marks: [pin])
+        XCTAssertEqual(Board(folder: folder).notes, [Note(number: 1, kind: .bug, text: "second", author: "Junker", marks: [pin])])
+    }
+
+    func testADeletedNoteStaysGoneAfterARestart() {
+        let folder = tempFolder()
+        let board = Board(folder: folder)
+        let gone = board.add(.wish, "gone", author: "", marks: [box])
+        board.add(.wish, "kept", author: "", marks: [box])
+        board.remove(gone.number)
+        XCTAssertEqual(Board(folder: folder).notes.map(\.text), ["kept"])
+    }
+
+    func testSentNotesLeaveThePinboardForGood() {
+        let folder = tempFolder()
+        let board = Board(folder: folder)
+        board.send(round([board.add(.wish, "sent", author: "", marks: [box])]))
+        XCTAssertEqual(Board(folder: folder).notes, [])
+    }
+
+    func testNumbersCountOnFromTheNotesThatCameBack() {
+        let folder = tempFolder()
+        let board = Board(folder: folder)
+        board.add(.wish, "one", author: "", marks: [box])
+        board.add(.wish, "two", author: "", marks: [box])
+        XCTAssertEqual(Board(folder: folder).add(.wish, "three", author: "", marks: [box]).number, 3)
+    }
+
+    func testNotesFromLastTimeStayForTheFirstShare() {
+        let folder = tempFolder()
+        Board(folder: folder).add(.wish, "from last time", author: "", marks: [box])
+        let board = Board(folder: folder)
+        XCTAssertTrue(board.restored)
+        board.forget()
+        XCTAssertEqual(board.notes.count, 1)
+        XCTAssertFalse(board.restored)
+        board.forget()
+        XCTAssertEqual(Board(folder: folder).notes, [])
+    }
+
+    func testAnUnreadableNotesFileStartsAnEmptyPinboard() throws {
+        let folder = tempFolder()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(#"{"notes": [{"number": "x"}]}"#.utf8).write(to: folder.appendingPathComponent("notes.json"))
+        let board = Board(folder: folder)
+        XCTAssertEqual(board.notes, [])
+        XCTAssertFalse(board.restored)
+    }
+
+    func testNotesFromLastTimeAreCounted() {
+        XCTAssertEqual(Say(german: false).fromLastTime(1), "1 note from last time is waiting. Share the same window or region again to see it.")
+        XCTAssertEqual(Say(german: true).fromLastTime(2), "2 Notizen vom letzten Mal warten. Gib dasselbe Fenster oder denselben Bereich wieder frei, dann siehst du sie.")
     }
 
     func testAnUpdateKeepsTheNumberAndTakesTheMarksAsEdited() {

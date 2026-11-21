@@ -239,11 +239,13 @@ class Sending(unittest.TestCase):
         self.assertEqual(Rounds().answer(False), {"ok": True, "round": 0})
         self.assertEqual(Rounds().answer(True), {"ok": True, "round": 0})
 
-    def test_only_the_latest_round_is_kept(self):
+    def test_rounds_sent_before_any_is_fetched_wait_in_turn(self):
         rounds = Rounds()
         rounds.send({"title": "first"})
         rounds.send({"title": "second"})
-        self.assertEqual(rounds.answer(False), {"ok": True, "round": 2, "title": "second"})
+        self.assertEqual(rounds.answer(True, True), {"ok": True, "round": 1, "title": "first"})
+        rounds.confirm(1)
+        self.assertEqual(rounds.answer(True, True), {"ok": True, "round": 2, "title": "second"})
 
     def test_a_round_counts_as_read_once_handed_out(self):
         rounds = Rounds()
@@ -260,30 +262,114 @@ class Waiting(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        self.file = os.path.join(folder.name, "knightsight", "round.json")
+        self.folder = os.path.join(folder.name, "knightsight")
 
     def test_a_sent_round_waits_for_the_assistant_across_a_restart(self):
-        Rounds(self.file).send({"title": "first", "notes": [{"text": "Cut off"}]})
-        self.assertEqual(Rounds(self.file).answer(True),
+        Rounds(self.folder).send({"title": "first", "notes": [{"text": "Cut off"}]})
+        self.assertEqual(Rounds(self.folder).answer(True, True),
                          {"ok": True, "round": 1, "title": "first", "notes": [{"text": "Cut off"}]})
 
-    def test_a_fetched_round_is_not_kept_for_the_next_start(self):
-        rounds = Rounds(self.file)
+    def test_a_round_waits_on_disk_until_the_assistant_confirms_it(self):
+        rounds = Rounds(self.folder)
+        rounds.send({"title": "first"})
+        self.assertEqual(rounds.answer(True, True)["title"], "first")
+        self.assertEqual(Rounds(self.folder).answer(True, True)["title"], "first")
+        rounds.confirm(1)
+        self.assertEqual(Rounds(self.folder).answer(True, True), {"ok": True, "round": 0})
+
+    def test_an_unconfirmed_round_is_handed_out_again(self):
+        rounds = Rounds(self.folder)
+        rounds.send({"title": "first"})
+        rounds.answer(True, True)
+        self.assertEqual(rounds.answer(True, True)["title"], "first")
+        rounds.confirm(1)
+        self.assertEqual(rounds.answer(True, True), {"ok": True, "round": 1})
+
+    def test_a_round_is_dropped_once_handed_out_when_the_assistant_does_not_confirm(self):
+        rounds = Rounds(self.folder)
         rounds.send({"title": "first"})
         rounds.answer(True)
-        self.assertEqual(Rounds(self.file).answer(False), {"ok": True, "round": 0})
+        self.assertEqual(Rounds(self.folder).answer(False), {"ok": True, "round": 0})
 
     def test_rounds_count_on_from_the_one_that_waited(self):
-        Rounds(self.file).send({"title": "first"})
-        rounds = Rounds(self.file)
+        Rounds(self.folder).send({"title": "first"})
+        rounds = Rounds(self.folder)
         self.assertEqual(rounds.send({"title": "second"}), 2)
 
+    def test_a_round_in_the_earlier_file_is_handed_out_and_confirmed(self):
+        os.makedirs(self.folder)
+        file = os.path.join(self.folder, "round.json")
+        with open(file, "w") as f:
+            f.write('{"ok": true, "round": 4, "title": "t", "notes": []}')
+        rounds = Rounds(self.folder)
+        self.assertEqual(rounds.answer(True, True)["round"], 4)
+        rounds.confirm(4)
+        self.assertFalse(os.path.exists(file))
+
     def test_an_unreadable_file_counts_as_nothing_sent(self):
-        os.makedirs(os.path.dirname(self.file))
+        os.makedirs(self.folder)
         for content in ("{not json", "[1, 2]", '{"title": "no number"}'):
+            with open(os.path.join(self.folder, "round.json"), "w") as f:
+                f.write(content)
+            self.assertEqual(Rounds(self.folder).answer(False), {"ok": True, "round": 0})
+
+
+class Pinned(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.file = os.path.join(folder.name, "knightsight", "notes.json")
+
+    def test_a_pinned_note_is_back_after_a_restart(self):
+        Board(self.file).add("question", "Why two?", "Junker", [Mark(10, 20, 30, 40), Mark(5, 6)])
+        self.assertEqual(Board(self.file).notes,
+                         [Note(1, "question", "Why two?", "Junker", [Mark(10, 20, 30, 40), Mark(5, 6)])])
+
+    def test_an_edited_note_is_kept_as_edited(self):
+        board = Board(self.file)
+        note = board.add("wish", "first", "", [Mark(1, 2, 3, 4)])
+        board.update(note, "bug", "second", "Junker", [Mark(5, 6, 7, 8)])
+        self.assertEqual(Board(self.file).notes, [Note(1, "bug", "second", "Junker", [Mark(5, 6, 7, 8)])])
+
+    def test_a_deleted_note_stays_gone_after_a_restart(self):
+        board = Board(self.file)
+        gone = board.add("wish", "gone", "", [Mark(1, 2)])
+        board.add("wish", "kept", "", [Mark(1, 2)])
+        board.remove(gone)
+        self.assertEqual([n.text for n in Board(self.file).notes], ["kept"])
+
+    def test_sent_notes_leave_the_pinboard_for_good(self):
+        board = Board(self.file)
+        board.add("wish", "sent", "", [Mark(1, 2)])
+        board.clear()
+        self.assertEqual(Board(self.file).notes, [])
+
+    def test_numbers_count_on_from_the_notes_that_came_back(self):
+        board = Board(self.file)
+        board.add("wish", "one", "", [Mark(1, 2)])
+        board.add("wish", "two", "", [Mark(1, 2)])
+        self.assertEqual(Board(self.file).next, 3)
+
+    def test_notes_from_last_time_stay_for_the_first_share(self):
+        Board(self.file).add("wish", "from last time", "", [Mark(1, 2)])
+        board = Board(self.file)
+        self.assertTrue(board.restored)
+        board.forget()
+        self.assertEqual(len(board.notes), 1)
+        self.assertFalse(board.restored)
+        board.forget()
+        self.assertEqual(Board(self.file).notes, [])
+
+    def test_an_unreadable_file_starts_an_empty_pinboard(self):
+        os.makedirs(os.path.dirname(self.file))
+        broken = ("{not json", '{"notes": [{"number": "x"}]}',
+                  '{"notes": [{"number": 1, "kind": "rant", "text": "", "author": "", "marks": []}]}')
+        for content in broken:
             with open(self.file, "w") as f:
                 f.write(content)
-            self.assertEqual(Rounds(self.file).answer(False), {"ok": True, "round": 0})
+            board = Board(self.file)
+            self.assertEqual(board.notes, [])
+            self.assertFalse(board.restored)
 
 
 class Author(unittest.TestCase):
