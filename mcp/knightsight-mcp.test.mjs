@@ -255,7 +255,7 @@ test('gives up waiting for a control after the seconds it was given', async () =
   });
 });
 
-// A stand-in for ssh on the PATH. As a tunnel it takes connections and closes them unanswered,
+// A stand-in for ssh on the PATH. As a tunnel it takes requests and closes without an answer,
 // the way nothing listening on the desk shows up. Asked a command, it answers like a desk
 // where desk says whether it is Windows or not and whether KnightSight runs.
 const FAKE_SSH = `#!/usr/bin/env node
@@ -263,7 +263,7 @@ const net = require('node:net');
 const args = process.argv.slice(2);
 if (args.includes('-N')) {
   const local = Number(args[args.indexOf('-L') + 1].split(':')[1]);
-  net.createServer((socket) => socket.destroy()).listen(local, '127.0.0.1');
+  net.createServer((socket) => { socket.on('error', () => {}); socket.once('data', () => socket.end()); }).listen(local, '127.0.0.1');
 } else {
   const [system, runs] = process.env.FAKE_DESK.split(' ');
   const command = args.at(-1);
