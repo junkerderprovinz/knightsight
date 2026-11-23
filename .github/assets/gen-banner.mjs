@@ -9,10 +9,13 @@
  * greys read on either background. Text becomes SVG paths, so the SVG renders the same
  * everywhere without the fonts.
  *
- * Deps (global): opentype.js, @resvg/resvg-js. Fonts are fetched to the OS temp dir.
+ * The name is set in Bree Serif Light and the claim in Bree Light. Both are licensed and never committed, so
+ * HOUSE_FONTS (default %LOCALAPPDATA%\halleluja-fonts) must hold them as TTF.
+ *
+ * Deps (global): opentype.js, @resvg/resvg-js.
  * Run: node .github/assets/gen-banner.mjs
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -38,17 +41,9 @@ const THEMES = [
   { suffix: "-dark", bg: "#0d1117", name: "#e6edf3", claim: "#9aa4ad" },
 ];
 
-async function font(file, url) {
-  const path = join(tmpdir(), file);
-  if (!existsSync(path)) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`font fetch ${res.status}: ${url}`);
-    writeFileSync(path, Buffer.from(await res.arrayBuffer()));
-  }
-  return opentype.parse(readFileSync(path));
-}
-const nameFont = await font("KnightSight-BreeSerif-Regular.ttf", "https://github.com/google/fonts/raw/main/ofl/breeserif/BreeSerif-Regular.ttf");
-const claimFont = await font("KnightSight-Lato-Regular.ttf", "https://github.com/google/fonts/raw/main/ofl/lato/Lato-Regular.ttf");
+const fonts = process.env.HOUSE_FONTS ?? join(process.env.LOCALAPPDATA ?? tmpdir(), "halleluja-fonts");
+const nameFont = opentype.parse(readFileSync(join(fonts, "bree-serif-light.ttf")).buffer);
+const claimFont = opentype.parse(readFileSync(join(fonts, "bree-light.ttf")).buffer);
 
 // The shared name size is 132; a name too long for the row beside the logo is set smaller rather than run off.
 const room = W - 2 * margin - LOGO - gap;
@@ -64,7 +59,7 @@ const blockH = nameAsc + nameDesc + lineGap + claimAsc;
 const nameBaseline = H / 2 - blockH / 2 + nameAsc;
 const claimBaseline = nameBaseline + nameDesc + lineGap + claimAsc;
 
-// Drawn at the origin and moved into place, since opentype.js puts a NaN into some Lato
+// Drawn at the origin and moved into place, since opentype.js puts a NaN into some
 // curves at large coordinates, and written from the commands for the same reason.
 const pathData = (path) => path.commands.map((c) => (c.type === "Z" ? "Z"
   : c.type + [c.x1, c.y1, c.x2, c.y2, c.x, c.y].filter((v) => v !== undefined).map((v) => v.toFixed(2)).join(" "))).join("");
