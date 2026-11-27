@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 7508 245.3">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 7988 245.3">
 <svg x="0" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841.9 245.3" width="841.9" height="245.3" role="img" aria-label="Download for Windows">
   <title>Download for Windows</title>
   <defs>
@@ -37,7 +37,7 @@
     </g>
   </g>
 </svg>
-<svg x="866" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 457.783 245.3" width="457.783" height="245.3" role="img" aria-label="Download for Windows on ARM">
+<svg x="914" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 457.783 245.3" width="457.783" height="245.3" role="img" aria-label="Download for Windows on ARM">
   <title>Download for Windows on ARM</title>
   <defs>
     <clipPath id="b1-edge">
@@ -72,7 +72,7 @@
     </g>
   </g>
 </svg>
-<svg x="1348" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841.9 245.3" width="841.9" height="245.3" role="img" aria-label="Download for macOS on Apple silicon or Intel">
+<svg x="1444" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841.9 245.3" width="841.9" height="245.3" role="img" aria-label="Download for macOS on Apple silicon or Intel">
   <title>Download for macOS on Apple silicon or Intel</title>
   <defs>
     <clipPath id="b2-edge">
@@ -109,7 +109,7 @@
     </g>
   </g>
 </svg>
-<svg x="2214" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841.9 245.3" width="841.9" height="245.3" role="img" aria-label="Download for Linux">
+<svg x="2358" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841.9 245.3" width="841.9" height="245.3" role="img" aria-label="Download for Linux">
   <title>Download for Linux</title>
   <defs>
     <clipPath id="b3-edge">
@@ -146,7 +146,7 @@
     </g>
   </g>
 </svg>
-<svg x="3080" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 457.783 245.3" width="457.783" height="245.3" role="img" aria-label="Download for Linux on ARM">
+<svg x="3272" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 457.783 245.3" width="457.783" height="245.3" role="img" aria-label="Download for Linux on ARM">
   <title>Download for Linux on ARM</title>
   <defs>
     <clipPath id="b4-edge">
@@ -181,7 +181,7 @@
     </g>
   </g>
 </svg>
-<svg x="3562" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841.9 245.3" width="841.9" height="245.3" role="img" aria-label="Download the Flatpak">
+<svg x="3802" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841.9 245.3" width="841.9" height="245.3" role="img" aria-label="Download the Flatpak">
   <title>Download the Flatpak</title>
   <defs>
     <clipPath id="b5-edge">
@@ -218,7 +218,7 @@
     </g>
   </g>
 </svg>
-<svg x="4428" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 457.783 245.3" width="457.783" height="245.3" role="img" aria-label="Download the Flatpak for ARM">
+<svg x="4716" y="0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 457.783 245.3" width="457.783" height="245.3" role="img" aria-label="Download the Flatpak for ARM">
   <title>Download the Flatpak for ARM</title>
   <defs>
     <clipPath id="b6-edge">
@@ -253,7 +253,7 @@
     </g>
   </g>
 </svg>
-<svg x="4910" y="0" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+<svg x="5246" y="0" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      version="1.1" viewBox="0 0 841.9 245.3" width="841.9" height="245.3">
   <defs>
     <clipPath id="b7-edge">
@@ -289,7 +289,7 @@
     </g>
   </g>
 </svg>
-<svg x="5776" y="0" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+<svg x="6160" y="0" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      version="1.1" viewBox="0 0 841.9 245.3" width="841.9" height="245.3">
   <defs>
     <clipPath id="b8-edge">
@@ -325,7 +325,7 @@
     </g>
   </g>
 </svg>
-<svg x="6642" y="0" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+<svg x="7074" y="0" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      version="1.1" viewBox="0 0 841.9 245.3" width="841.9" height="245.3">
   <defs>
     <clipPath id="b9-edge">
