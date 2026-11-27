@@ -13,7 +13,7 @@ Fonticons, Inc.
 <https://flatpak.org/press>. The path is the one from Simple Icons (the
 collection itself is CC0 1.0).
 
-Windows, Apple, Linux and Flatpak are trademarks of their owners. Each mark sits
-on the button that downloads for that platform, unmodified apart from its
-colour, to name it, and nothing here claims endorsement by or affiliation with
-its owner.
+Windows, Apple, Linux and Flatpak are trademarks of their owners, Microsoft,
+Apple, Linus Torvalds and the Flatpak project. Each mark sits on the button that
+downloads for that platform, unmodified apart from its colour, to name it, and
+nothing here claims endorsement by or affiliation with its owner.
