@@ -9,6 +9,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Web.Script.Serialization;
 using System.Windows.Automation;
 using System.Windows.Forms;
@@ -562,6 +563,62 @@ namespace KnightSight
                         foreach (var p in new[] { new Point(i, j), new Point(j, i), new Point(i, 255 - j), new Point(255 - j, i) })
                             if (icon.GetPixel(p.X, p.Y).A != 0) throw new Exception("ink at " + p);
             }
+        }
+
+        static void TaskbarIconHoldsEverySizeOfTheLogo()
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "KnightSightTests-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var path = Taskbar.WriteIcon(folder);
+                Same(Path.Combine(folder, "KnightSight.ico"), path);
+                var file = File.ReadAllBytes(path);
+                int[] sizes = { 16, 24, 32, 48, 64, 256 };
+                Same(sizes.Length, (int)BitConverter.ToUInt16(file, 4));
+                for (int i = 0; i < sizes.Length; i++) Same((byte)(sizes[i] % 256), file[6 + 16 * i]);
+                // The way the shell reads it, since System.Drawing skips the 256 pixel frame.
+                foreach (var size in new[] { 16, 32, 256 })
+                {
+                    var handle = LoadImage(IntPtr.Zero, path, 1, size, size, 0x10);
+                    True(handle != IntPtr.Zero, "no icon at " + size);
+                    using (var icon = Icon.FromHandle(handle)) Same(size, icon.Width);
+                    Native.DestroyIcon(handle);
+                }
+                var written = File.GetLastWriteTimeUtc(path);
+                File.SetLastWriteTimeUtc(path, written.AddHours(-1));
+                Taskbar.WriteIcon(folder);
+                Same(written.AddHours(-1), File.GetLastWriteTimeUtc(path));
+            }
+            finally { Directory.Delete(folder, true); }
+        }
+
+        static void PanelNamesItsAppCommandAndIconToTheTaskbar()
+        {
+            using (var form = new Form())
+            {
+                Taskbar.Claim(form.Handle, @"C:\icons\KnightSight.ico");
+                Same(Taskbar.AppId, Property(form.Handle, Taskbar.Id));
+                Same("\"" + Application.ExecutablePath + "\"", Property(form.Handle, Taskbar.RelaunchCommand));
+                Same("KnightSight", Property(form.Handle, Taskbar.RelaunchName));
+                Same(@"C:\icons\KnightSight.ico,0", Property(form.Handle, Taskbar.RelaunchIcon));
+                Taskbar.Release(form.Handle);
+                Same(null, Property(form.Handle, Taskbar.Id));
+                Same(null, Property(form.Handle, Taskbar.RelaunchIcon));
+            }
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadImage(IntPtr instance, string name, uint type, int width, int height, uint load);
+
+        static string Property(IntPtr window, uint id)
+        {
+            var store = Taskbar.Store(window);
+            var key = Taskbar.Key(id);
+            Native.PROPVARIANT value;
+            store.GetValue(ref key, out value);
+            var text = value.vt == 31 ? Marshal.PtrToStringUni(value.pointer) : null;
+            Native.PropVariantClear(ref value);
+            Marshal.ReleaseComObject(store);
+            return text;
         }
 
         static void ExeCarriesTheVersionThePanelShows()

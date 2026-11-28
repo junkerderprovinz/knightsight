@@ -94,6 +94,8 @@ namespace KnightSight
         [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
         [DllImport("kernel32.dll")] public static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
         [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
+        [DllImport("shell32.dll", PreserveSig = false)] public static extern IPropertyStore SHGetPropertyStoreForWindow(IntPtr hWnd, [In] ref Guid iid);
+        [DllImport("ole32.dll")] public static extern int PropVariantClear(ref PROPVARIANT value);
 
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr param);
 
@@ -108,6 +110,19 @@ namespace KnightSight
         [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
         [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
         [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
+        [StructLayout(LayoutKind.Sequential, Pack = 4)] public struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+        // Only strings travel in it, but the store copies the whole union, which is 24 bytes on 64 bit.
+        [StructLayout(LayoutKind.Explicit, Size = 24)] public struct PROPVARIANT { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr pointer; }
+
+        [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        public interface IPropertyStore
+        {
+            void GetCount(out uint count);
+            void GetAt(uint index, out PROPERTYKEY key);
+            void GetValue(ref PROPERTYKEY key, out PROPVARIANT value);
+            void SetValue(ref PROPERTYKEY key, ref PROPVARIANT value);
+            void Commit();
+        }
     }
 
     class Refused : Exception
@@ -1655,6 +1670,110 @@ namespace KnightSight
                 Native.DestroyIcon(handle);
                 return icon;
             }
+        }
+
+        // The .ico that build.ps1 puts into the exe and the taskbar reads, a PNG for each size.
+        public static byte[] IconFile()
+        {
+            int[] sizes = { 16, 24, 32, 48, 64, 256 };
+            var frames = new byte[sizes.Length][];
+            for (int i = 0; i < sizes.Length; i++)
+                using (var bmp = RenderIcon(sizes[i]))
+                using (var ms = new MemoryStream())
+                {
+                    bmp.Save(ms, ImageFormat.Png);
+                    frames[i] = ms.ToArray();
+                }
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms))
+            {
+                w.Write((ushort)0);
+                w.Write((ushort)1);
+                w.Write((ushort)sizes.Length);
+                int offset = 6 + 16 * sizes.Length;
+                for (int i = 0; i < sizes.Length; i++)
+                {
+                    // Width and height 0 stand for 256.
+                    var edge = (byte)(sizes[i] % 256);
+                    w.Write(edge);
+                    w.Write(edge);
+                    w.Write((byte)0);
+                    w.Write((byte)0);
+                    w.Write((ushort)1);
+                    w.Write((ushort)32);
+                    w.Write(frames[i].Length);
+                    w.Write(offset);
+                    offset += frames[i].Length;
+                }
+                foreach (var frame in frames) w.Write(frame);
+                w.Flush();
+                return ms.ToArray();
+            }
+        }
+    }
+
+    // Left to itself the taskbar shows the icon of the exe behind a window and pins that exe,
+    // and for an exe on a network share it shows a blank icon. A window that names its app,
+    // command and icon gets its button and its pin from those instead.
+    static class Taskbar
+    {
+        public const string AppId = "JunkerDerProvinz.KnightSight";
+        public const uint RelaunchCommand = 2, RelaunchIcon = 3, RelaunchName = 4, Id = 5;
+
+        // Kept on the local disk, where the shell can always read it, and rewritten when the
+        // logo changes.
+        public static string WriteIcon(string folder)
+        {
+            var path = Path.Combine(folder, "KnightSight.ico");
+            var bytes = Logo.IconFile();
+            try
+            {
+                if (File.Exists(path) && System.Collections.StructuralComparisons.StructuralEqualityComparer.Equals(File.ReadAllBytes(path), bytes)) return path;
+                Directory.CreateDirectory(folder);
+                File.WriteAllBytes(path, bytes);
+                return path;
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+
+        public static void Claim(IntPtr window, string icon)
+        {
+            var store = Store(window);
+            Set(store, RelaunchCommand, "\"" + Application.ExecutablePath + "\"");
+            Set(store, RelaunchName, "KnightSight");
+            if (icon != null) Set(store, RelaunchIcon, icon + ",0");
+            // Setting the id has the taskbar read the others, so it goes last.
+            Set(store, Id, AppId);
+            Marshal.ReleaseComObject(store);
+        }
+
+        // Windows wants the properties gone before the window is.
+        public static void Release(IntPtr window)
+        {
+            var store = Store(window);
+            foreach (var key in new[] { Id, RelaunchIcon, RelaunchName, RelaunchCommand }) Set(store, key, null);
+            Marshal.ReleaseComObject(store);
+        }
+
+        public static Native.IPropertyStore Store(IntPtr window)
+        {
+            var iid = typeof(Native.IPropertyStore).GUID;
+            return Native.SHGetPropertyStoreForWindow(window, ref iid);
+        }
+
+        public static Native.PROPERTYKEY Key(uint id)
+        {
+            return new Native.PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = id };
+        }
+
+        static void Set(Native.IPropertyStore store, uint id, string value)
+        {
+            var key = Key(id);
+            // VT_LPWSTR, or VT_EMPTY to remove the property.
+            var v = new Native.PROPVARIANT { vt = (ushort)(value == null ? 0 : 31), pointer = Marshal.StringToCoTaskMemUni(value) };
+            try { store.SetValue(ref key, ref v); }
+            finally { Marshal.FreeCoTaskMem(v.pointer); }
         }
     }
 
@@ -4186,6 +4305,18 @@ namespace KnightSight
                 g.DrawString(headText, titleFont, title, head, format);
                 g.DrawString(subText, bodyFont, body, sub, format);
             }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Taskbar.Claim(Handle, Taskbar.WriteIcon(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KnightSight")));
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            Taskbar.Release(Handle);
+            base.OnHandleDestroyed(e);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

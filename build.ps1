@@ -40,25 +40,8 @@ $refs = @(
 ) + $automation
 # One piece of text for Add-Type, which works since LogoShapes.cs brings no usings of its own.
 Add-Type -TypeDefinition ((Get-Content -Raw -Encoding UTF8 $sources) -join "`n") -ReferencedAssemblies $refs
-$sizes = 16, 24, 32, 48, 64, 256
-$images = foreach ($size in $sizes) {
-    $ms = New-Object System.IO.MemoryStream
-    ([KnightSight.Logo]::RenderIcon($size)).Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-    , $ms.ToArray()
-}
 $ico = Join-Path $work 'knightsight.ico'
-$w = New-Object System.IO.BinaryWriter ([System.IO.File]::Create($ico))
-$w.Write([uint16]0); $w.Write([uint16]1); $w.Write([uint16]$sizes.Count)
-$offset = 6 + 16 * $sizes.Count
-for ($i = 0; $i -lt $sizes.Count; $i++) {
-    # Width and height 0 stand for 256.
-    $edge = [byte]($sizes[$i] % 256)
-    $w.Write($edge); $w.Write($edge); $w.Write([byte]0); $w.Write([byte]0)
-    $w.Write([uint16]1); $w.Write([uint16]32); $w.Write([uint32]$images[$i].Length); $w.Write([uint32]$offset)
-    $offset += $images[$i].Length
-}
-foreach ($image in $images) { $w.Write($image) }
-$w.Close()
+[System.IO.File]::WriteAllBytes($ico, [KnightSight.Logo]::IconFile())
 
 # AnyCPU without a preference for 32 bit, so one file runs on x64 and on ARM64 alike.
 & $csc /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 "/out:$Out" "/win32icon:$ico" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll @automationRefs @resources $sources
